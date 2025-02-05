@@ -76,9 +76,6 @@ jobs:
           # Activate the virtual environment
           source .venv/bin/activate
 
-          # Change directory to the GLaDOS TTS generator using Wyoming
-          cd /usr/src/wyoming-glados
-
           # Start the server in the background, redirecting output to server.log
           nohup python3 __main__.py --uri 'tcp://0.0.0.0:10201' --debug > server.log 2>&1 &
           SERVER_PID=$!
