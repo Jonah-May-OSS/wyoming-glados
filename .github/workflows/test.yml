@@ -1,0 +1,120 @@
+name: Test GLaDOS TTS Server
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '.github/**'
+      - '.vscode/**'
+      - 'docker/**'
+
+jobs:
+  test_linux:
+    name: "Build and Test on Linux (self-hosted runner)"
+    runs-on: self-hosted
+    steps:
+      # 1. Checkout the repository code
+      - name: Checkout Code
+        uses: actions/checkout@85e6279cec87321a52edac9c87bce653a07cf6c2
+        with:
+          submodules: recursive
+
+      # 2. Install GCC and G++
+      - name: Install GCC and G++
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y gcc g++
+
+      # 3. Install Netcat (nc) for listening checks
+      - name: Install Netcat
+        shell: bash
+        run: |
+          sudo apt-get install -y netcat-openbsd
+
+      # 4. Setup Python environment
+      - name: Setup Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: '3.12'  # Use a stable version
+
+      # 5. Install Python venv
+      - name: Install Python Virtual Environment Package
+        shell: bash
+        run: |
+          pip install virtualenv
+
+      # 6. (Optional) Install Nvidia Drivers and CUDA Toolkit if needed.
+      # Comment or remove these steps if your GLaDOS TTS generator does not require CUDA.
+      - name: Install Nvidia Drivers
+        shell: bash
+        run: |
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y nvidia-open
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@8022558310ea543e35132143092835585f60e628
+
+      # 7. Create and activate virtual environment
+      - name: Setup Virtual Environment
+        shell: bash
+        run: |
+          chmod +x script/setup
+          ./script/setup
+
+      # 8. Start the GLaDOS TTS server and test listening
+      - name: Start GLaDOS TTS Server and Test Listening
+        shell: bash
+        run: |
+          # Activate the virtual environment
+          source .venv/bin/activate
+
+          # Change directory to the GLaDOS TTS generator using Wyoming
+          cd /usr/src/wyoming-glados
+
+          # Start the server in the background, redirecting output to server.log
+          nohup python3 __main__.py --uri 'tcp://0.0.0.0:10201' --debug > server.log 2>&1 &
+          SERVER_PID=$!
+          echo "Started GLaDOS TTS server with PID $SERVER_PID"
+
+          # Function to check if the server is listening on port 10201
+          function is_server_listening() {
+            nc -z localhost 10201
+          }
+
+          # Initialize timeout parameters
+          TIMEOUT=600      # Maximum time to wait for the server to start (in seconds)
+          INTERVAL=10      # Interval between each check (in seconds)
+          ELAPSED=0
+
+          # Loop to check if the server is listening
+          while ! is_server_listening; do
+            if [ $ELAPSED -ge $TIMEOUT ]; then
+              echo "Server failed to start within $TIMEOUT seconds."
+              kill $SERVER_PID
+              exit 1  # Exit with failure
+            fi
+            echo "Waiting for server to start... ($ELAPSED/$TIMEOUT seconds elapsed)"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "Server is successfully listening on port 10201."
+
+          # Terminate the server gracefully
+          kill $SERVER_PID
+          wait $SERVER_PID 2>/dev/null || true
+
+          exit 0
+
+      # 9. Upload server logs if the test fails
+      - name: Upload Server Logs
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: server-logs
+          path: server.log
