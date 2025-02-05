@@ -64,8 +64,10 @@ jobs:
       - name: Setup Virtual Environment
         shell: bash
         run: |
-          chmod +x script/setup
-          ./script/setup
+          python3 -m venv .venv
+          source .venv/bin/activate
+          python3 download.py
+          pip install -r requirements.txt
 
       # 8. Start the GLaDOS TTS server and test listening
       - name: Start GLaDOS TTS Server and Test Listening
