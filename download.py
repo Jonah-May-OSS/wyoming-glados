@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Utility for downloading GLaDOS TTS models."""
 
 import argparse
@@ -10,7 +11,9 @@ from typing import Union
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import urlopen
 
-DEFAULT_URL = "https://github.com/nalf3in/glados-tts/releases/download/v0.1.0-alpha/{file}"
+DEFAULT_URL = (
+    "https://github.com/nalf3in/glados-tts/releases/download/v0.1.0-alpha/{file}"
+)
 DEFAULT_MODEL_DIR = "./gladostts/models"
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,10 +57,14 @@ def is_valid_file(file_path: Path, expected_md5: str) -> bool:
 def ensure_model_exists(download_dir: Path, base_url: str):
     """Ensure that all required model files are present and valid."""
     # List of model files and their expected MD5 checksums
+
     model_files = [
         {"filename": "glados-new.pt", "md5": "d6945ffd96ee0619d0d49a581b5b83ad"},
         {"filename": "glados.pt", "md5": "11383a00f7ddfc8f80285ce3aba2ebb0"},
-        {"filename": "en_us_cmudict_ipa_forward.pt", "md5": "33887f7f579f010ce4463534306120b0"},
+        {
+            "filename": "en_us_cmudict_ipa_forward.pt",
+            "md5": "33887f7f579f010ce4463534306120b0",
+        },
         {"filename": "emb/glados_p2.pt", "md5": "ff2ad1438e9acb1f8e8607864c239ffc"},
         {"filename": "emb/glados_p1.pt", "md5": "e0ffe67a6f53c4ff0b3952fc678946d9"},
         {"filename": "vocoder-gpu.pt", "md5": "d35c13c01d2cacd348aa216649bbfac3"},
@@ -73,12 +80,12 @@ def ensure_model_exists(download_dir: Path, base_url: str):
         if is_valid_file(model_file_path, model["md5"]):
             _LOGGER.info("File %s is valid.", model_file_path)
             continue  # No need to download
-
         # Remove invalid or incomplete file
+
         if model_file_path.exists():
             model_file_path.unlink()
-
         # Download the file
+
         try:
             filename = model_file.split("/")[-1]
             model_url = base_url.format(file=filename)
@@ -90,10 +97,13 @@ def ensure_model_exists(download_dir: Path, base_url: str):
             _LOGGER.info("Downloaded %s", model_file_path)
 
             # Verify MD5 hash after download
+
             if is_valid_file(model_file_path, model["md5"]):
                 _LOGGER.info("Verified MD5 hash for %s.", model_file_path)
             else:
-                _LOGGER.error("MD5 hash mismatch after download for %s.", model_file_path)
+                _LOGGER.error(
+                    "MD5 hash mismatch after download for %s.", model_file_path
+                )
                 if model_file_path.exists():
                     model_file_path.unlink()
         except Exception:
