@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Utility for running the GLaDOS TTS server."""
 
 import argparse
@@ -14,10 +15,12 @@ from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
 # Configure logging
+
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
 # Ensure 'gladostts' module is importable
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -58,18 +61,19 @@ async def main() -> None:
     args = parser.parse_args()
 
     # Set logging level based on debug flag
+
     if args.debug:
         _LOGGER.setLevel(logging.DEBUG)
-
     _LOGGER.debug("Starting GLaDOS TTS server with arguments: %s", args)
 
     # Validate models directory
+
     models_dir = args.models_dir.resolve()
     if not models_dir.exists():
         _LOGGER.error("Models directory does not exist: %s", models_dir)
         sys.exit(1)
-
     # Define TTS voices
+
     voice_attribution = Attribution(
         name="R2D2FISH", url="https://github.com/R2D2FISH/glados-tts"
     )
@@ -85,6 +89,7 @@ async def main() -> None:
     ]
 
     # Define TTS program information
+
     wyoming_info = Info(
         tts=[
             TtsProgram(
@@ -99,6 +104,7 @@ async def main() -> None:
     )
 
     # Initialize GLaDOS TTS
+
     _LOGGER.debug("Initializing GLaDOS TTS engine...")
     glados_tts = TTSRunner(
         use_p1=False,
@@ -107,20 +113,19 @@ async def main() -> None:
     )
 
     # Ensure NLTK 'punkt' data is downloaded
+
     try:
         nltk_data.find("tokenizers/punkt_tab")
         _LOGGER.debug("NLTK 'punkt' tokenizer data is already available.")
     except LookupError:
         _LOGGER.debug("Downloading NLTK 'punkt' tokenizer data...")
         nltk_download("punkt_tab", quiet=not args.debug)
-
     # Start the server
+
     _LOGGER.info("Starting the GLaDOS TTS server...")
     server = AsyncServer.from_uri(args.uri)
     try:
-        await server.run(
-            partial(GladosEventHandler, wyoming_info, args, glados_tts)
-        )
+        await server.run(partial(GladosEventHandler, wyoming_info, args, glados_tts))
     except Exception as e:
         _LOGGER.exception("An error occurred while running the server: %s", e)
         sys.exit(1)
