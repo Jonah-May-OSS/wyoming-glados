@@ -6,6 +6,7 @@
   "assignees": ["JonahMMay"],
   "labels": ["renovate"],
   "configMigration": true,
+  "forkProcessing": "enabled",
   "packageRules": [
   {
     "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
