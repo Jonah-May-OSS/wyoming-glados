@@ -7,7 +7,7 @@ numpy~=2.2.2
 pandas~=2.2.2
 pydub~=0.25.1
 scipy~=1.15.1
-torch~=2.6.0
+torch~=2.7.0
 tqdm~=4.67.1
 Unidecode~=1.3.8
 audioop-lts~=0.2.1; python_version>='3.13'
