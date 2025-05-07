@@ -59,6 +59,8 @@ jobs:
 
       - name: Install CUDA Toolkit
         uses: Jimver/cuda-toolkit@8022558310ea543e35132143092835585f60e628
+        with:
+          use-github-cache: false
 
       # 7. Create and activate virtual environment
       - name: Setup Virtual Environment
