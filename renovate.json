@@ -5,6 +5,7 @@
   ],
   "assignees": ["JonahMMay"],
   "labels": ["renovate"],
+  "configMigration": true,
   "packageRules": [
   {
     "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
