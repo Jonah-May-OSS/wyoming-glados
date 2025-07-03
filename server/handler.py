@@ -48,7 +48,7 @@ class GladosEventHandler(AsyncEventHandler):
         self.glados_tts = glados_tts
         self.samples_per_chunk = samples_per_chunk
 
-        # Streaming state
+        # For streaming
         self._stream_buffer: list[str] = []
         self._streaming = False
 
@@ -71,35 +71,32 @@ class GladosEventHandler(AsyncEventHandler):
             _LOGGER.debug("Sent info")
             return True
 
-        # --- Start of a new TTS stream ---
+        # --- TTS streaming events ---
         if SynthesizeStart.is_type(event.type):
             _LOGGER.debug("Received synthesize-start")
             self._stream_buffer.clear()
             self._streaming = True
             return True
 
-        # --- Accumulate text chunks ---
         if SynthesizeChunk.is_type(event.type):
             chunk = SynthesizeChunk.from_event(event)
             _LOGGER.debug("Received synthesize-chunk: %r", chunk.text)
             self._stream_buffer.append(chunk.text)
             return True
 
-        # --- End of TTS stream: synthesize everything at once ---
         if SynthesizeStop.is_type(event.type):
             _LOGGER.debug(
                 "Received synthesize-stop, performing TTS on accumulated text"
             )
             full_text = "".join(self._stream_buffer).strip()
-            # reset streaming flag
             self._streaming = False
 
-            if not full_text:
-                audio = AudioSegment.silent(duration=0)
-            else:
+            if full_text:
                 audio = self.handle_tts_request(full_text)
+            else:
+                audio = AudioSegment.silent(duration=0)
 
-            # send audio-start + chunks + audio-stop
+            # stream audio out
             rate = audio.frame_rate
             width = audio.sample_width
             channels = audio.channels
@@ -110,11 +107,11 @@ class GladosEventHandler(AsyncEventHandler):
 
             raw = audio.raw_data
             bps = width * channels
-            chunk_size = bps * self.samples_per_chunk
-            for offset in range(0, len(raw), chunk_size):
+            size = bps * self.samples_per_chunk
+            for i in range(0, len(raw), size):
                 await self.write_event(
                     AudioChunk(
-                        audio=raw[offset : offset + chunk_size],
+                        audio=raw[i : i + size],
                         rate=rate,
                         width=width,
                         channels=channels,
@@ -122,12 +119,11 @@ class GladosEventHandler(AsyncEventHandler):
                 )
 
             await self.write_event(AudioStop().event())
-            # let client know we're done
             await self.write_event(SynthesizeStopped().event())
             _LOGGER.debug("Completed streaming response")
             return True
 
-        # --- Legacy single-shot TTS; ignore if we're in a streaming session ---
+        # --- Legacy single‐shot TTS (only if not in streaming flow) ---
         if Synthesize.is_type(event.type):
             if self._streaming:
                 _LOGGER.debug("Ignoring legacy synthesize during streaming")
@@ -137,7 +133,7 @@ class GladosEventHandler(AsyncEventHandler):
             raw_text = synth.text
             _LOGGER.debug("Received legacy synthesize: %r", raw_text)
 
-            # clean up newlines & auto-punctuate
+            # cleanup & auto-punctuate
             text = " ".join(raw_text.strip().splitlines())
             if self.cli_args.auto_punctuation and text:
                 if not any(text.endswith(p) for p in self.cli_args.auto_punctuation):
@@ -145,15 +141,10 @@ class GladosEventHandler(AsyncEventHandler):
             _LOGGER.debug("Synthesize: raw_text=%r, text=%r", raw_text, text)
 
             if text:
-                try:
-                    audio = self.handle_tts_request(text)
-                except Exception as e:
-                    _LOGGER.exception("Error during TTS synthesis: %s", e)
-                    return True
+                audio = self.handle_tts_request(text)
             else:
                 audio = AudioSegment.silent(duration=0)
 
-            # stream out exactly as above
             rate = audio.frame_rate
             width = audio.sample_width
             channels = audio.channels
@@ -164,11 +155,11 @@ class GladosEventHandler(AsyncEventHandler):
 
             raw = audio.raw_data
             bps = width * channels
-            chunk_size = bps * self.samples_per_chunk
-            for offset in range(0, len(raw), chunk_size):
+            size = bps * self.samples_per_chunk
+            for i in range(0, len(raw), size):
                 await self.write_event(
                     AudioChunk(
-                        audio=raw[offset : offset + chunk_size],
+                        audio=raw[i : i + size],
                         rate=rate,
                         width=width,
                         channels=channels,
@@ -179,6 +170,6 @@ class GladosEventHandler(AsyncEventHandler):
             _LOGGER.debug("Completed legacy request")
             return True
 
-        # --- Anything else, ignore ---
+        # Anything else, ignore
         _LOGGER.warning("Unexpected event: %s", event)
         return True
