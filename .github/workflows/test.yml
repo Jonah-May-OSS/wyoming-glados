@@ -65,11 +65,11 @@ jobs:
         with:
           use-github-cache: false
       
-      - name: Add CUDA bin to PATH
-        run: echo "${CUDA_PATH}/bin" >> $GITHUB_PATH
+      - name: Add CUDA 12.9 bin to PATH
+        run: echo "/usr/local/cuda-12.9/bin" >> $GITHUB_PATH
 
-      - name: Add CUDA lib to LD_LIBRARY_PATH
-        run: echo "LD_LIBRARY_PATH=${CUDA_PATH}/lib64:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+      - name: Add CUDA 12.9 lib to LD_LIBRARY_PATH
+        run: echo "LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       # 7. Create and activate virtual environment
       - name: Setup Virtual Environment
@@ -129,3 +129,18 @@ jobs:
         with:
           name: server-logs
           path: server.log
+      
+      # 10. CUDA driver/library mismatch auto-fix (only on failure)
+      - name: CUDA Driver/Library Mismatch Auto-Fix
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          echo "Scanning server.log for NVML initialization failure..."
+          if grep -Fq "Failed to initialize NVML: Driver/library version mismatch" server.log; then
+            echo "CUDA driver/library version mismatch detected—upgrading system and rebooting."
+            sudo apt update
+            sudo apt upgrade -y
+            sudo reboot
+          else
+            echo "No NVML mismatch found; skipping auto-fix."
+          fi
