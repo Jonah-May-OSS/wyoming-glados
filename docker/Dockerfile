@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
+FROM nvcr.io/nvidia/tensorrt:25.06-py3
 
 WORKDIR /usr/src
 
