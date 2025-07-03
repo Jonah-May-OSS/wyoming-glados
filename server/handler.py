@@ -1,4 +1,4 @@
-"""Event handler for clients of the server."""
+"""Event handler for clients of the server, now with Wyoming TTS streaming support."""
 
 import argparse
 import logging
@@ -8,8 +8,13 @@ from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.event import Event
 from wyoming.info import Describe, Info
 from wyoming.server import AsyncEventHandler
-from wyoming.tts import Synthesize
-
+from wyoming.tts import (
+    Synthesize,
+    SynthesizeStart,
+    SynthesizeChunk,
+    SynthesizeStop,
+    SynthesizeStopped,
+)
 import nltk
 from nltk.tokenize import sent_tokenize
 from pydub import AudioSegment
@@ -18,7 +23,6 @@ from gladostts.glados import TTSRunner
 _LOGGER = logging.getLogger(__name__)
 
 # Ensure NLTK 'punkt' data is downloaded
-
 try:
     nltk.data.find("tokenizers/punkt_tab")
     _LOGGER.debug("NLTK 'punkt_tab' tokenizer data is already available.")
@@ -33,6 +37,7 @@ class GladosEventHandler(AsyncEventHandler):
         wyoming_info: Info,
         cli_args: argparse.Namespace,
         glados_tts: TTSRunner,
+        samples_per_chunk: int,
         *args,
         **kwargs,
     ) -> None:
@@ -41,109 +46,139 @@ class GladosEventHandler(AsyncEventHandler):
         self.cli_args = cli_args
         self.wyoming_info_event = wyoming_info.event()
         self.glados_tts = glados_tts
+        self.samples_per_chunk = samples_per_chunk
+
+        # Streaming state
+        self._stream_buffer: list[str] = []
+        self._streaming = False
 
     def handle_tts_request(self, text: str, delay: float = 250) -> AudioSegment:
-        """Generate an AudioSegment for the given text with optional delay between sentences.
-
-        Args:
-            text: The text to synthesize.
-            delay: The delay between sentences in milliseconds.
-
-        Returns:
-            An AudioSegment containing the synthesized speech.
-        """
+        """Generate an AudioSegment for the given text with optional delay between sentences."""
         sentences = sent_tokenize(text)
         if not sentences:
             return AudioSegment.silent(duration=0)
         audio = self.glados_tts.run_tts(sentences[0])
         pause = AudioSegment.silent(duration=delay)
-
         for sentence in sentences[1:]:
-            new_line = self.glados_tts.run_tts(sentence)
-            audio += pause + new_line
+            audio += pause + self.glados_tts.run_tts(sentence)
         return audio
 
     async def handle_event(self, event: Event) -> bool:
-        """Handle incoming events from the client.
-
-        Args:
-            event: The event to handle.
-
-        Returns:
-            True if the connection should remain open, False otherwise.
-        """
+        """Handle incoming events from the client, including TTS streaming."""
+        # --- Service description ---
         if Describe.is_type(event.type):
             await self.write_event(self.wyoming_info_event)
             _LOGGER.debug("Sent info")
             return True
-        if not Synthesize.is_type(event.type):
-            _LOGGER.warning("Unexpected event: %s", event)
+
+        # --- Start of a new TTS stream ---
+        if SynthesizeStart.is_type(event.type):
+            _LOGGER.debug("Received synthesize-start")
+            self._stream_buffer.clear()
+            self._streaming = True
             return True
-        synthesize = Synthesize.from_event(event)
-        _LOGGER.debug("Received synthesis request: %s", synthesize)
 
-        raw_text = synthesize.text
+        # --- Accumulate text chunks ---
+        if SynthesizeChunk.is_type(event.type):
+            chunk = SynthesizeChunk.from_event(event)
+            _LOGGER.debug("Received synthesize-chunk: %r", chunk.text)
+            self._stream_buffer.append(chunk.text)
+            return True
 
-        # Join multiple lines
-
-        text = " ".join(raw_text.strip().splitlines())
-
-        if self.cli_args.auto_punctuation and text:
-            # Add automatic punctuation (important for some voices)
-
-            if not any(
-                text.endswith(punc_char) for punc_char in self.cli_args.auto_punctuation
-            ):
-                text += self.cli_args.auto_punctuation[0]
-        # Actual TTS synthesis
-
-        _LOGGER.debug("Synthesize: raw_text='%s', text='%s'", raw_text, text)
-
-        if text:
-            try:
-                audio = self.handle_tts_request(text)
-            except Exception as e:
-                _LOGGER.exception("Error during TTS synthesis: %s", e)
-                # Optionally, send an error message to the client
-
-                return True
-        else:
-            audio = AudioSegment.silent(duration=0)
-        rate = audio.frame_rate
-        width = audio.sample_width
-        channels = audio.channels
-
-        await self.write_event(
-            AudioStart(
-                rate=rate,
-                width=width,
-                channels=channels,
-            ).event(),
-        )
-
-        # Audio data
-
-        audio_bytes = audio.raw_data
-        bytes_per_sample = width * channels
-        bytes_per_chunk = bytes_per_sample * self.cli_args.samples_per_chunk
-        num_chunks = (
-            len(audio_bytes) + bytes_per_chunk - 1
-        ) // bytes_per_chunk  # Ceiling division
-
-        # Split into chunks and send
-
-        for i in range(num_chunks):
-            offset = i * bytes_per_chunk
-            chunk = audio_bytes[offset : offset + bytes_per_chunk]
-            await self.write_event(
-                AudioChunk(
-                    audio=chunk,
-                    rate=rate,
-                    width=width,
-                    channels=channels,
-                ).event(),
+        # --- End of TTS stream: synthesize everything at once ---
+        if SynthesizeStop.is_type(event.type):
+            _LOGGER.debug(
+                "Received synthesize-stop, performing TTS on accumulated text"
             )
-        await self.write_event(AudioStop().event())
-        _LOGGER.debug("Completed request")
+            full_text = "".join(self._stream_buffer).strip()
+            # reset streaming flag
+            self._streaming = False
 
+            if not full_text:
+                audio = AudioSegment.silent(duration=0)
+            else:
+                audio = self.handle_tts_request(full_text)
+
+            # send audio-start + chunks + audio-stop
+            rate = audio.frame_rate
+            width = audio.sample_width
+            channels = audio.channels
+
+            await self.write_event(
+                AudioStart(rate=rate, width=width, channels=channels).event()
+            )
+
+            raw = audio.raw_data
+            bps = width * channels
+            chunk_size = bps * self.samples_per_chunk
+            for offset in range(0, len(raw), chunk_size):
+                await self.write_event(
+                    AudioChunk(
+                        audio=raw[offset : offset + chunk_size],
+                        rate=rate,
+                        width=width,
+                        channels=channels,
+                    ).event()
+                )
+
+            await self.write_event(AudioStop().event())
+            # let client know we're done
+            await self.write_event(SynthesizeStopped().event())
+            _LOGGER.debug("Completed streaming response")
+            return True
+
+        # --- Legacy single-shot TTS; ignore if we're in a streaming session ---
+        if Synthesize.is_type(event.type):
+            if self._streaming:
+                _LOGGER.debug("Ignoring legacy synthesize during streaming")
+                return True
+
+            synth = Synthesize.from_event(event)
+            raw_text = synth.text
+            _LOGGER.debug("Received legacy synthesize: %r", raw_text)
+
+            # clean up newlines & auto-punctuate
+            text = " ".join(raw_text.strip().splitlines())
+            if self.cli_args.auto_punctuation and text:
+                if not any(text.endswith(p) for p in self.cli_args.auto_punctuation):
+                    text += self.cli_args.auto_punctuation[0]
+            _LOGGER.debug("Synthesize: raw_text=%r, text=%r", raw_text, text)
+
+            if text:
+                try:
+                    audio = self.handle_tts_request(text)
+                except Exception as e:
+                    _LOGGER.exception("Error during TTS synthesis: %s", e)
+                    return True
+            else:
+                audio = AudioSegment.silent(duration=0)
+
+            # stream out exactly as above
+            rate = audio.frame_rate
+            width = audio.sample_width
+            channels = audio.channels
+
+            await self.write_event(
+                AudioStart(rate=rate, width=width, channels=channels).event()
+            )
+
+            raw = audio.raw_data
+            bps = width * channels
+            chunk_size = bps * self.samples_per_chunk
+            for offset in range(0, len(raw), chunk_size):
+                await self.write_event(
+                    AudioChunk(
+                        audio=raw[offset : offset + chunk_size],
+                        rate=rate,
+                        width=width,
+                        channels=channels,
+                    ).event()
+                )
+
+            await self.write_event(AudioStop().event())
+            _LOGGER.debug("Completed legacy request")
+            return True
+
+        # --- Anything else, ignore ---
+        _LOGGER.warning("Unexpected event: %s", event)
         return True

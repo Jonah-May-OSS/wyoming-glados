@@ -20,7 +20,6 @@ warnings.filterwarnings(
     module=r"torch\.nn\.modules\.transformer",
 )
 
-
 # 2) actually turn it off under the hood
 import torch.nn.modules.transformer as _tfm
 
@@ -51,7 +50,6 @@ class NanosecondFormatter(logging.Formatter):
     def formatTime(
         self, record: logging.LogRecord, datefmt: Optional[str] = None
     ) -> str:
-        """Formats the time with nanosecond precision."""
         ct = record.created
         t = time.localtime(ct)
         s = time.strftime("%Y-%m-%d %H:%M:%S", t)
@@ -59,13 +57,6 @@ class NanosecondFormatter(logging.Formatter):
 
 
 def setup_logging(debug: bool, log_format: str) -> None:
-    """
-    Sets up logging with the specified level and format.
-
-    Args:
-        debug (bool): Whether to enable DEBUG level logging.
-        log_format (str): Format string for log messages.
-    """
     formatter = NanosecondFormatter(log_format)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
@@ -118,13 +109,12 @@ async def main() -> None:
     setup_logging(args.debug, args.log_format)
 
     # Validate models directory
-
     models_dir = args.models_dir.resolve()
     if not models_dir.exists():
         logger.error("Models directory does not exist: %s", models_dir)
         sys.exit(1)
-    # Define TTS voices
 
+    # Define TTS voices
     voice_attribution = Attribution(
         name="R2D2FISH", url="https://github.com/R2D2FISH/glados-tts"
     )
@@ -139,8 +129,7 @@ async def main() -> None:
         )
     ]
 
-    # Define TTS program information
-
+    # Define TTS program information (streaming support enabled)
     wyoming_info = Info(
         tts=[
             TtsProgram(
@@ -150,6 +139,7 @@ async def main() -> None:
                 installed=True,
                 voices=voices,
                 version=2,
+                supports_synthesize_streaming=True,  # ← ADDED
             )
         ],
     )
@@ -161,12 +151,10 @@ async def main() -> None:
         log=args.debug,
         models_dir=models_dir,
     )
-
     logger.debug("GLaDOS TTS engine initialized successfully.")
 
-    # sanity-check that our RNN weights are contiguous
+    # Sanity-check RNN weights for cuDNN
     try:
-        # if the ScriptModule exposes .rnn, flatten now and log
         glados_tts.glados.rnn.flatten_parameters()
         logger.debug("Flattened RNN weights for best cuDNN performance.")
     except Exception:
@@ -178,15 +166,24 @@ async def main() -> None:
         logger.debug("NLTK 'punkt' tokenizer data is already available.")
     except LookupError:
         logger.debug("Downloading NLTK 'punkt' tokenizer data...")
-        nltk_download("punkt_tab", quiet=not args.debug)
+        nltk.download("punkt_tab", quiet=not args.debug)
 
     # Start the server
-
     logger.info("Starting the GLaDOS TTS server on %s", args.uri)
     server = AsyncServer.from_uri(args.uri)
     logger.info("Server started and listening on %s", args.uri)
+
+    # Build a handler factory that includes your chunk size
+    handler_factory = partial(
+        GladosEventHandler,
+        wyoming_info,
+        args,
+        glados_tts,
+        args.samples_per_chunk,
+    )
+
     try:
-        await server.run(partial(GladosEventHandler, wyoming_info, args, glados_tts))
+        await server.run(handler_factory)
     except Exception as e:
         logger.exception("An error occurred while running the server: %s", e)
         sys.exit(1)
