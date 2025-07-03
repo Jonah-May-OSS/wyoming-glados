@@ -1,8 +1,9 @@
-"""Event handler for clients of the server, now with Wyoming TTS streaming support."""
+#!/usr/bin/env python3
+"""Event handler for clients of the server, now with true pipelined TTS streaming support."""
 
 import argparse
 import logging
-from typing import Optional
+from typing import List
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.event import Event
@@ -49,14 +50,18 @@ class GladosEventHandler(AsyncEventHandler):
         self.samples_per_chunk = samples_per_chunk
 
         # For streaming
-        self._stream_buffer: list[str] = []
+        self._stream_buffer: List[str] = []
         self._streaming = False
 
     def handle_tts_request(self, text: str, delay: float = 250) -> AudioSegment:
-        """Generate an AudioSegment for the given text with optional delay between sentences."""
+        """
+        Legacy helper: chunk up text into sentences, run run_tts() on each, and concat.
+        (This is still used by the single‐shot Synthesize path.)
+        """
         sentences = sent_tokenize(text)
         if not sentences:
             return AudioSegment.silent(duration=0)
+
         audio = self.glados_tts.run_tts(sentences[0])
         pause = AudioSegment.silent(duration=delay)
         for sentence in sentences[1:]:
@@ -64,7 +69,7 @@ class GladosEventHandler(AsyncEventHandler):
         return audio
 
     async def handle_event(self, event: Event) -> bool:
-        """Handle incoming events from the client, including TTS streaming."""
+        """Handle incoming events from the client, including true pipelined TTS streaming."""
         # --- Service description ---
         if Describe.is_type(event.type):
             await self.write_event(self.wyoming_info_event)
@@ -86,44 +91,60 @@ class GladosEventHandler(AsyncEventHandler):
 
         if SynthesizeStop.is_type(event.type):
             _LOGGER.debug(
-                "Received synthesize-stop, performing TTS on accumulated text"
+                "Received synthesize-stop, performing pipelined TTS on accumulated text"
             )
-            full_text = "".join(self._stream_buffer).strip()
             self._streaming = False
+            full_text = "".join(self._stream_buffer).strip()
 
-            if full_text:
-                audio = self.handle_tts_request(full_text)
-            else:
-                audio = AudioSegment.silent(duration=0)
+            if not full_text:
+                # nothing to say
+                await self.write_event(
+                    AudioStart(rate=22050, width=2, channels=1).event()
+                )
+                await self.write_event(AudioStop().event())
+                await self.write_event(SynthesizeStopped().event())
+                return True
 
-            # stream audio out
-            rate = audio.frame_rate
-            width = audio.sample_width
-            channels = audio.channels
+            # —— true pipelined streaming loop ——
+            first = True
 
-            await self.write_event(
-                AudioStart(rate=rate, width=width, channels=channels).event()
-            )
+            # NOTE: stream_tts() is a regular generator, so use a normal for-loop
+            for pcm, rate, width, channels in self.glados_tts.stream_tts(
+                full_text,
+                alpha=1.0,
+                samples_per_chunk=self.samples_per_chunk,
+            ):
+                if pcm == b"__AUDIO_START__":
+                    await self.write_event(
+                        AudioStart(rate=rate, width=width, channels=channels).event()
+                    )
+                    continue
+                if pcm == b"__AUDIO_STOP__":
+                    await self.write_event(AudioStop().event())
+                    continue
+                if pcm == b"__SYNTH_STOPPED__":
+                    await self.write_event(SynthesizeStopped().event())
+                    continue
 
-            raw = audio.raw_data
-            bps = width * channels
-            size = bps * self.samples_per_chunk
-            for i in range(0, len(raw), size):
+                # real audio chunk
+                if first:
+                    # if your stream_tts() now handles start-marker itself, you can drop this
+                    # but keeping it safe in case you yield raw PCM first
+                    await self.write_event(
+                        AudioStart(rate=rate, width=width, channels=channels).event()
+                    )
+                    first = False
+
                 await self.write_event(
                     AudioChunk(
-                        audio=raw[i : i + size],
-                        rate=rate,
-                        width=width,
-                        channels=channels,
+                        audio=pcm, rate=rate, width=width, channels=channels
                     ).event()
                 )
 
-            await self.write_event(AudioStop().event())
-            await self.write_event(SynthesizeStopped().event())
             _LOGGER.debug("Completed streaming response")
             return True
 
-        # --- Legacy single‐shot TTS (only if not in streaming flow) ---
+        # --- Legacy single-shot TTS (only if not in streaming flow) ---
         if Synthesize.is_type(event.type):
             if self._streaming:
                 _LOGGER.debug("Ignoring legacy synthesize during streaming")
