@@ -156,9 +156,8 @@ class GladosEventHandler(AsyncEventHandler):
 
             # cleanup & auto-punctuate
             text = " ".join(raw_text.strip().splitlines())
-            if self.cli_args.auto_punctuation and text:
-                if not any(text.endswith(p) for p in self.cli_args.auto_punctuation):
-                    text += self.cli_args.auto_punctuation[0]
+            if self.cli_args.auto_punctuation and text and not any(text.endswith(p) for p in self.cli_args.auto_punctuation):
+                text += self.cli_args.auto_punctuation[0]
             _LOGGER.debug("Synthesize: raw_text=%r, text=%r", raw_text, text)
 
             if text:

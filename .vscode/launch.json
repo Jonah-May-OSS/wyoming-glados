@@ -6,12 +6,12 @@
       "name": "Python: glados wyoming",
       "type": "debugpy",
       "request": "launch",
-      "python": "${workspaceFolder}/.venv/bin/python",
+      "python": "${command:python.interpreterPath}",
       "program": "${workspaceFolder}/__main__.py",
       "console": "integratedTerminal",
       "justMyCode": true,
       "args": [
-        "--uri",  "tcp://0.0.0.0:10201",
+        "--uri", "tcp://0.0.0.0:10201",
         "--debug"
       ]
     }
