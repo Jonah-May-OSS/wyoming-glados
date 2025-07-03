@@ -110,39 +110,35 @@ class GladosEventHandler(AsyncEventHandler):
 
             first = True
 
-            # NOTE: stream_tts() is a regular generator, so use a normal for-loop
-
-            for pcm, rate, width, channels in self.glados_tts.stream_tts(
-                full_text,
-                alpha=1.0,
-                samples_per_chunk=self.samples_per_chunk,
-            ):
-                if pcm == b"__AUDIO_START__":
-                    await self.write_event(
-                        AudioStart(rate=rate, width=width, channels=channels).event()
-                    )
-                    continue
-                if pcm == b"__AUDIO_STOP__":
-                    await self.write_event(AudioStop().event())
-                    continue
-                if pcm == b"__SYNTH_STOPPED__":
-                    await self.write_event(SynthesizeStopped().event())
-                    continue
-                # real audio chunk
-
-                if first:
-                    # if your stream_tts() now handles start-marker itself, you can drop this
-                    # but keeping it safe in case you yield raw PCM first
+            try:
+                for pcm, rate, width, channels in self.glados_tts.stream_tts(
+                    full_text,
+                    alpha=1.0,
+                    samples_per_chunk=self.samples_per_chunk,
+                ):
+                    if pcm == b"__AUDIO_START__":
+                        await self.write_event(
+                            AudioStart(rate=rate, width=width, channels=channels).event()
+                        )
+                        continue
+                    if pcm == b"__AUDIO_STOP__":
+                        await self.write_event(AudioStop().event())
+                        continue
+                    if pcm == b"__SYNTH_STOPPED__":
+                        await self.write_event(SynthesizeStopped().event())
+                        continue
+                    # real audio chunk
 
                     await self.write_event(
-                        AudioStart(rate=rate, width=width, channels=channels).event()
+                        AudioChunk(
+                            audio=pcm, rate=rate, width=width, channels=channels
+                        ).event()
                     )
-                    first = False
-                await self.write_event(
-                    AudioChunk(
-                        audio=pcm, rate=rate, width=width, channels=channels
-                    ).event()
-                )
+            except Exception as e:
+                _LOGGER.error("Streaming TTS failed: %s", e)
+                await self.write_event(SynthesizeStopped().event())
+                return True
+            
             _LOGGER.debug("Completed streaming response")
             return True
         # --- Legacy single-shot TTS (only if not in streaming flow) ---
@@ -184,7 +180,7 @@ class GladosEventHandler(AsyncEventHandler):
             for i in range(0, len(raw), size):
                 await self.write_event(
                     AudioChunk(
-                        audio=raw[i : i + size],
+                        audio=raw[i:i + size],
                         rate=rate,
                         width=width,
                         channels=channels,
