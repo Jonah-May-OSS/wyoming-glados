@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 """Event handler for clients of the server, now with true pipelined TTS streaming support."""
 
 import argparse
@@ -25,6 +26,7 @@ from gladostts.glados import TTSRunner
 _LOGGER = logging.getLogger(__name__)
 
 # Ensure NLTK 'punkt' data is downloaded
+
 
 try:
     nltk.data.find("tokenizers/punkt_tab")
@@ -118,7 +120,9 @@ class GladosEventHandler(AsyncEventHandler):
                 ):
                     if pcm == b"__AUDIO_START__":
                         await self.write_event(
-                            AudioStart(rate=rate, width=width, channels=channels).event()
+                            AudioStart(
+                                rate=rate, width=width, channels=channels
+                            ).event()
                         )
                         continue
                     if pcm == b"__AUDIO_STOP__":
@@ -138,7 +142,6 @@ class GladosEventHandler(AsyncEventHandler):
                 _LOGGER.error("Streaming TTS failed: %s", e)
                 await self.write_event(SynthesizeStopped().event())
                 return True
-            
             _LOGGER.debug("Completed streaming response")
             return True
         # --- Legacy single-shot TTS (only if not in streaming flow) ---
@@ -180,7 +183,7 @@ class GladosEventHandler(AsyncEventHandler):
             for i in range(0, len(raw), size):
                 await self.write_event(
                     AudioChunk(
-                        audio=raw[i:i + size],
+                        audio=raw[i : i + size],
                         rate=rate,
                         width=width,
                         channels=channels,
