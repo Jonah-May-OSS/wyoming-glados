@@ -13,4 +13,4 @@ jobs:
       - uses: psf/black@262ad62ca9f1d1b1537cc95a91643fb781d7c501
         with:
           options: "--check --verbose"
-          version: "~= 24.0"
+          version: "~= 25.1"
