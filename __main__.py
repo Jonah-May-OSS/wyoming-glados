@@ -20,10 +20,6 @@ warnings.filterwarnings(
     module=r"torch\.nn\.modules\.transformer",
 )
 
-warnings.filterwarnings(
-    "ignore",
-    message=r"RNN module weights are not part of single contiguous chunk of memory.*",
-)
 
 # 2) actually turn it off under the hood
 import torch.nn.modules.transformer as _tfm
