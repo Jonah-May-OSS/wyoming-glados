@@ -13,9 +13,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f
+        with:
+          fetch-depth: 0
 
-      - name: Fetch all history for all tags and branches
-        run: git fetch --prune --unshallow
+      - name: Extract version from branch name
+        run: |
+          VERSION=${GITHUB_REF#refs/heads/release/}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Zip Release
         run: zip -x '*.git*' -r release.zip .
@@ -27,43 +31,35 @@ jobs:
           separator: '/'
           msg: ${{ github.repository }}
 
-      - name: Install GitVersion
-        uses: gittools/actions/gitversion/setup@8158c9b0979085a1a9f72e30d7734c553dd72ad5
-        with:
-          versionSpec: '5.x'
-
-      - name: Use GitVersion
-        uses: gittools/actions/gitversion/execute@8158c9b0979085a1a9f72e30d7734c553dd72ad5
-        id: gitversion
-
       - name: Install GitReleaseManager
-        uses: gittools/actions/gitreleasemanager/setup@8158c9b0979085a1a9f72e30d7734c553dd72ad5
+        uses: gittools/actions/gitreleasemanager/setup@6d65c75c52d5c4b38a58a7010431bdbca4df74fa
         with:
-          versionSpec: '0.18.x'
+          versionSpec: '0.20.x'
 
       - name: Create release with GitReleaseManager
-        uses: gittools/actions/gitreleasemanager/create@8158c9b0979085a1a9f72e30d7734c553dd72ad5
+        uses: gittools/actions/gitreleasemanager/create@6d65c75c52d5c4b38a58a7010431bdbca4df74fa
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           owner: ${{ steps.repo.outputs._0 }}
           repository: ${{ steps.repo.outputs._1 }}
-          milestone: ${{ steps.gitversion.outputs.MajorMinorPatch }}
-          name: ${{ steps.gitversion.outputs.MajorMinorPatch }}
+          tag:       ${{ env.VERSION }}
+          milestone: ${{ env.VERSION }}
+          name:      ${{ env.VERSION }}
           assets: |
             release.zip
 
       - name: Publish release with GitReleaseManager
-        uses: gittools/actions/gitreleasemanager/publish@8158c9b0979085a1a9f72e30d7734c553dd72ad5
+        uses: gittools/actions/gitreleasemanager/publish@6d65c75c52d5c4b38a58a7010431bdbca4df74fa
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           owner: ${{ steps.repo.outputs._0 }}
           repository: ${{ steps.repo.outputs._1 }}
-          milestone: ${{ steps.gitversion.outputs.MajorMinorPatch }}
+          milestone: ${{ env.VERSION }}
 
       - name: Close release with GitReleaseManager
-        uses: gittools/actions/gitreleasemanager/close@8158c9b0979085a1a9f72e30d7734c553dd72ad5
+        uses: gittools/actions/gitreleasemanager/close@6d65c75c52d5c4b38a58a7010431bdbca4df74fa
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           owner: ${{ steps.repo.outputs._0 }}
           repository: ${{ steps.repo.outputs._1 }}
-          milestone: ${{ steps.gitversion.outputs.MajorMinorPatch }}
+          milestone: ${{ github.ref_name }}
