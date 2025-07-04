@@ -31,14 +31,16 @@ class SentenceBoundaryDetector:
             match_text = match.group(0)
 
             # Add to current sentence
+
             self.current_sentence += match_text
-        
+
             # Check if we have a complete sentence (not an abbreviation)
+
             if not ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
-
             # Update the remaining text
+
             self.remaining_text = self.remaining_text[match.end() :]
 
     def finish(self) -> str:
