@@ -1,0 +1,18 @@
+version: "3"
+services:
+  wyoming-glados:
+    build: Dockerfile.igpu
+    context: .
+    dockerfile: Dockerfile
+    image: wyoming-glados
+    container_name: wyoming-glados
+    ports:
+      - 10201:10201
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
