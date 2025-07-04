@@ -42,6 +42,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
+from server.process import GladosProcessManager
 
 
 class NanosecondFormatter(logging.Formatter):
@@ -94,6 +95,11 @@ async def main() -> None:
         help="Number of samples per audio chunk",
     )
     parser.add_argument(
+        "--streaming",  # Add the streaming argument
+        action="store_true",
+        help="Enable streaming mode",
+    )
+    parser.add_argument(
         "--log-format",
         default="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         help="Format for log messages",
@@ -124,7 +130,7 @@ async def main() -> None:
             description="Default GLaDOS voice",
             attribution=voice_attribution,
             installed=True,
-            languages=["en"],
+            languages=["en_US"],
             version=2,
         )
     ]
@@ -168,20 +174,24 @@ async def main() -> None:
         logger.debug("Downloading NLTK 'punkt' tokenizer data...")
         nltk.download("punkt_tab", quiet=not args.debug)
 
-    # Start the server
-    logger.info("Starting the GLaDOS TTS server on %s", args.uri)
+    # Create the GladosProcessManager instance
+    process_manager = GladosProcessManager(glados_tts)
+
+    # Make sure default voice is loaded.
+    await process_manager.get_process()
+
+    # Start the server with the updated handler
     server = AsyncServer.from_uri(args.uri)
     logger.info("Server started and listening on %s", args.uri)
 
-    # Build a handler factory that includes your chunk size
     handler_factory = partial(
         GladosEventHandler,
         wyoming_info,
         args,
-        glados_tts,
-        args.samples_per_chunk,
+        process_manager,
     )
 
+    # Run the server
     try:
         await server.run(handler_factory)
     except Exception as e:
@@ -189,11 +199,11 @@ async def main() -> None:
         sys.exit(1)
 
 
+def run():
+    asyncio.run(main())
+
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        run()
     except KeyboardInterrupt:
-        logger.info("Server shutdown requested. Exiting...")
-    except Exception as e:
-        logger.exception("An unexpected error occurred: %s", e)
-        sys.exit(1)
+        pass
