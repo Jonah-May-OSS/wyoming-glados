@@ -1,6 +1,5 @@
 import argparse
 import logging
-import asyncio
 from typing import Optional
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
