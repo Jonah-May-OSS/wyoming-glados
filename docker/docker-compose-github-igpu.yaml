@@ -8,6 +8,8 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    environment:
+      - streaming=true
     restart: unless-stopped
     deploy:
       resources:

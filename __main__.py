@@ -130,7 +130,7 @@ async def main() -> None:
             description="Default GLaDOS voice",
             attribution=voice_attribution,
             installed=True,
-            languages=["en_US"],
+            languages=["en"],
             version=2,
         )
     ]

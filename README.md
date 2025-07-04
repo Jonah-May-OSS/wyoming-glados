@@ -26,6 +26,8 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    environment:
+      - streaming=true
     restart: unless-stopped
     deploy:
       resources:
@@ -45,6 +47,8 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    environment:
+      - streaming=true
     restart: unless-stopped
     deploy:
       resources:
@@ -64,6 +68,8 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    environment:
+      - streaming=true
     restart: unless-stopped
     runtime: nvidia
     environment:
@@ -86,6 +92,7 @@ docker run \
   -d \                                        # run in detached mode
   -p 10201:10201 \                            # map port 10201 → 10201
   -e DEVICE=cuda \                            # `cuda` or `cpu`
+  -e streaming=true \                         # Enable partial streaming
   captnspdr/wyoming-glados:latest-amd64
 ```
 
@@ -98,6 +105,7 @@ docker run \
   -d \                                        # run in detached mode
   -p 10201:10201 \                            # map port 10201 → 10201
   -e DEVICE=cuda \                            # `cuda` or `cpu`
+  -e streaming=true \                         # Enable partial streaming
   captnspdr/wyoming-glados:latest-arm64
 ```
 
@@ -110,6 +118,7 @@ docker run \
   -d \                                        # run in detached mode
   -p 10201:10201 \                            # map port 10201 → 10201
   -e DEVICE=cuda \                            # `cuda` or `cpu`
+  -e streaming=true \                         # Enable partial streaming
   captnspdr/wyoming-glados:latest-igpu
 ```
 
