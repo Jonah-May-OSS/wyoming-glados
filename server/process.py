@@ -44,10 +44,7 @@ class GladosProcessManager:
         if voice_name is None:
             voice_name = "default"  # Assuming default voice if none provided
         async with self.processes_lock:  # Lock access to the process dictionary
-            if (
-                voice_name not in self.processes
-                or self.processes[voice_name].runner != self.runner
-            ):
+            if voice_name not in self.processes:
                 # Initialize a new process if it doesn't exist
 
                 _LOGGER.debug(f"Initializing new process for voice: {voice_name}")

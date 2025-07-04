@@ -43,8 +43,6 @@ class GladosEventHandler(AsyncEventHandler):
         self._synthesize: Optional[Synthesize] = None
 
         self.audio_started = False
-        self.chunk_count = 0  # To track the number of chunks processed
-        self.chunk_buffer = []  # Buffer to accumulate text chunks
 
         self.buffer_empty_event = asyncio.Event()
         self.buffer_empty_event.set()  # Initially empty
@@ -131,7 +129,6 @@ class GladosEventHandler(AsyncEventHandler):
             async for pcm, rate, width, channels in glados_proc.run_tts(
                 synthesize.text
             ):
-                _LOGGER.debug(f"PCM data size: {len(pcm)} bytes")
 
                 # Send AudioStart event if it's not already sent
 
