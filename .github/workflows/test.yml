@@ -88,7 +88,7 @@ jobs:
           source .venv/bin/activate
 
           # Start the server in the background, redirecting output to server.log
-          nohup python3 __main__.py --uri 'tcp://0.0.0.0:10201' --debug > server.log 2>&1 &
+          nohup python3 __main__.py --uri 'tcp://0.0.0.0:10201' --debug --streaming > server.log 2>&1 &
           SERVER_PID=$!
           echo "Started GLaDOS TTS server with PID $SERVER_PID"
 

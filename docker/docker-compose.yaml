@@ -1,0 +1,17 @@
+version: "3"
+services:
+  wyoming-glados:
+    image: captnspdr/wyoming-glados:latest
+    container_name: wyoming-glados
+    ports:
+      - 10201:10201
+    environment:
+      - streaming=true
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
