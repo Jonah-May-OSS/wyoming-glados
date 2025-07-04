@@ -1,7 +1,7 @@
 version: "3"
 services:
   wyoming-glados:
-    image: captnspdrwyoming-glados:latest
+    image: captnspdr/wyoming-glados:latest
     container_name: wyoming-glados
     ports:
       - 10201:10201

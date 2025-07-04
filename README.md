@@ -66,11 +66,10 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
-    environment:
-      - streaming=true
     restart: unless-stopped
     runtime: nvidia
     environment:
+      - streaming=true
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ```

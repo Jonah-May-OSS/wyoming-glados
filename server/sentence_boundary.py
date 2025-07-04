@@ -23,7 +23,6 @@ class SentenceBoundaryDetector:
     def add_chunk(self, chunk: str) -> Iterable[str]:
         """Add a new chunk of text and yield sentences."""
         self.remaining_text += chunk
-        processed_chunks = []  # Track chunks that have been processed
 
         while self.remaining_text:
             match = SENTENCE_BOUNDARY_RE.search(self.remaining_text)
@@ -31,28 +30,16 @@ class SentenceBoundaryDetector:
                 break
             match_text = match.group(0)
 
-            # If it's the first sentence or continuation without abbreviation
-
-            if not self.current_sentence:
-                self.current_sentence = match_text
-            elif ABBREVIATION_RE.search(self.current_sentence[-5:]):
-                self.current_sentence += match_text
-            else:
-                # Yield and clear the current sentence
-
-                yield remove_asterisks(self.current_sentence.strip())
-                processed_chunks.append(self.current_sentence)  # Add processed chunk
-                self.current_sentence = match_text
+            # Add to current sentence
+            self.current_sentence += match_text
+        
+            # Check if we have a complete sentence (not an abbreviation)
             if not ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 yield remove_asterisks(self.current_sentence.strip())
-                processed_chunks.append(self.current_sentence)  # Add processed chunk
                 self.current_sentence = ""
+
             # Update the remaining text
-
             self.remaining_text = self.remaining_text[match.end() :]
-        # Clear processed chunks
-
-        return processed_chunks
 
     def finish(self) -> str:
         """Finalize and return the last sentence, clearing state."""

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Navigate to the Wyoming-Glados directory
-cd /usr/src/wyoming-glados
+cd /usr/src/wyoming-glados || { echo "Unable to cd into /usr/src/wyoming-glados"; exit 1; }
 
 # Read the DEVICE and streaming environment variables
 DEVICE=${DEVICE:-cuda}  # Default to 'cuda' if not set

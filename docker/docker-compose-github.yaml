@@ -1,7 +1,9 @@
 version: "3"
 services:
   wyoming-glados:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.igpu
     image: wyoming-glados
     container_name: wyoming-glados
     ports:
