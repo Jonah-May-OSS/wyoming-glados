@@ -71,6 +71,7 @@ class GladosEventHandler(AsyncEventHandler):
                 if self._synthesize.text:
                     await self._handle_synthesize(self._synthesize)
 
+                # Send AudioStop and SynthesizeStopped after all chunks are processed
                 await self.write_event(SynthesizeStopped().event())
                 _LOGGER.debug("Text stream stopped")
                 return True
@@ -94,7 +95,6 @@ class GladosEventHandler(AsyncEventHandler):
         try:
             # Start processing with run_tts
             async for pcm, rate, width, channels in glados_proc.run_tts(synthesize.text):
-                # Check if PCM data is coming through
                 _LOGGER.debug(f"PCM data size: {len(pcm)} bytes")
                 
                 # Send AudioStart event if it's not already sent
@@ -104,12 +104,20 @@ class GladosEventHandler(AsyncEventHandler):
                     )
                     self.audio_started = True
 
-                # Send audio chunk
+                # Send audio chunk as soon as it's generated
                 await self.write_event(
                     AudioChunk(audio=pcm, rate=rate, width=width, channels=channels).event()
                 )
 
             _LOGGER.debug(f"Sent AudioChunk event for chunk: {synthesize.text}")
+
+            # After all chunks are processed, ensure AudioStop is sent
+            await self.write_event(AudioStop().event())
+            _LOGGER.debug("AudioStop sent after all chunks")
+
+            # Send SynthesizeStopped event after finishing
+            await self.write_event(SynthesizeStopped().event())
+            _LOGGER.debug("SynthesizeStopped sent after all chunks")
 
         except Exception as e:
             _LOGGER.error(f"Error during TTS processing: {e}")
@@ -118,7 +126,5 @@ class GladosEventHandler(AsyncEventHandler):
             )
 
         # Stop the audio stream when done
-        await self.write_event(AudioStop().event())
         _LOGGER.debug("Completed request")
-
         return True
