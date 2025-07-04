@@ -155,9 +155,9 @@ class GladosEventHandler(AsyncEventHandler):
             )
         # Update buffer and notify when it becomes empty
 
-        self.chunk_buffer.clear()  # Clear the buffer after processing a chunk
-        if not self.chunk_buffer:  # If buffer is empty
-            self.buffer_empty_event.set()  # Set the event to notify waiting tasks
+        # Notify that processing is complete
+
+        self.buffer_empty_event.set()
         # Stop the audio stream when done
 
         _LOGGER.debug("Completed request")

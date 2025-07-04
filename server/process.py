@@ -21,21 +21,12 @@ class GladosProcess:
 
     async def run_tts(self, text: str, alpha: float = 1.0):
         """Process the text and handle TTS output."""
-        audio_segment = self.runner.run_tts(text, alpha)
-
-        # Process the audio segment here
-        # For example, you can yield the audio as bytes, or save it to a file
-
-        yield audio_segment.raw_data, audio_segment.frame_rate, audio_segment.sample_width, audio_segment.channels
-
-    async def stream_tts(self, text: str, alpha: float = 1.0):
-        """Process the text and handle TTS output."""
-        audio_segment = self.runner.stream_tts(text, alpha)
-
-        # Process the audio segment here
-        # For example, you can yield the audio as bytes, or save it to a file
-
-        yield audio_segment.raw_data, audio_segment.frame_rate, audio_segment.sample_width, audio_segment.channels
+        try:
+            audio_segment = self.runner.run_tts(text, alpha)
+            yield audio_segment.raw_data, audio_segment.frame_rate, audio_segment.sample_width, audio_segment.channels
+        except Exception as e:
+            _LOGGER.error(f"TTS processing failed for text: {text[:50]}... Error: {e}")
+            raise
 
 
 class GladosProcessManager:

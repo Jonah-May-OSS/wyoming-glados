@@ -10,17 +10,17 @@ TODOS:
 
 ## Usage
 
-### Pre-requisites:
+### Pre-requisites
 1. Install and configure Docker
 2. Install and configure the [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
 ### Docker Compose (recommended)
 For AMD64 with discrete GPUs:
-```
+```yaml
 version: "3"
 services:
   wyoming-glados:
-    image: captnspdrwyoming-glados:latest-amd64
+    image: captnspdr/wyoming-glados:latest-amd64
     container_name: wyoming-glados
     ports:
       - 10201:10201
@@ -37,11 +37,11 @@ services:
 ```
 
 For ARM64 with discrete GPUs:
-```
+```yaml
 version: "3"
 services:
   wyoming-glados:
-    image: captnspdrwyoming-glados:latest-arm64
+    image: captnspdr/wyoming-glados:latest-arm64
     container_name: wyoming-glados
     ports:
       - 10201:10201
@@ -58,7 +58,7 @@ services:
 ```
 
 For ARM64 with an iGPU like Jetson devices:
-```
+```yaml
 version: "3"
 services:
   wyoming-glados:
