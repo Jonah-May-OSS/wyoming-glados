@@ -44,9 +44,6 @@ class GladosEventHandler(AsyncEventHandler):
 
         self.audio_started = False
 
-        self.buffer_empty_event = asyncio.Event()
-        self.buffer_empty_event.set()  # Initially empty
-
     async def handle_event(self, event: Event) -> bool:
         if Describe.is_type(event.type):
             await self.write_event(self.wyoming_info_event)
@@ -72,15 +69,6 @@ class GladosEventHandler(AsyncEventHandler):
                 self._synthesize = Synthesize(text="", voice=stream_start.voice)
                 _LOGGER.debug("Text stream started: voice=%s", stream_start.voice)
                 return True
-            if SynthesizeStop.is_type(event.type):
-                assert self._synthesize is not None
-                self._synthesize.text = self.sbd.finish()
-                if self._synthesize.text:
-                    await self._handle_synthesize(self._synthesize)
-                # After receiving SynthesizeStop, finalize the synthesis process
-
-                await self._finalize_synthesis()
-                return True
             if SynthesizeChunk.is_type(event.type):
                 assert self._synthesize is not None
                 stream_chunk = SynthesizeChunk.from_event(event)
@@ -94,29 +82,28 @@ class GladosEventHandler(AsyncEventHandler):
 
                     await self._handle_synthesize(self._synthesize)
                 return True
+            if SynthesizeStop.is_type(event.type):
+                assert self._synthesize is not None
+                self._synthesize.text = self.sbd.finish()
+                if self._synthesize.text:
+                    # Final audio chunk(s)
+
+                    await self._handle_synthesize(self._synthesize)
+                # End of audio
+
+                await self.write_event(SynthesizeStopped().event())
+
+                _LOGGER.debug("Text stream stopped")
+                return True
+            if not Synthesize.is_type(event.type):
+                return True
+            synthesize = Synthesize.from_event(event)
+            return await self._handle_synthesize(synthesize)
         except Exception as err:
             await self.write_event(
                 Error(text=str(err), code=err.__class__.__name__).event()
             )
             raise err
-
-    async def _finalize_synthesis(self) -> None:
-        """Finalize the synthesis process after receiving SynthesizeStop"""
-        _LOGGER.debug("Finalizing synthesis after receiving SynthesizeStop")
-
-        # Wait for the buffer to be empty
-
-        await self.buffer_empty_event.wait()  # Wait until the buffer is empty
-
-        # After the buffer is empty, finalize
-
-        await self.write_event(AudioStop().event())
-        _LOGGER.debug("AudioStop sent after processing all batches")
-
-        # Send SynthesizeStopped event
-
-        await self.write_event(SynthesizeStopped().event())
-        _LOGGER.debug("SynthesizeStopped sent after processing all batches")
 
     async def _handle_synthesize(self, synthesize: Synthesize) -> bool:
         _LOGGER.debug(synthesize)
@@ -150,11 +137,7 @@ class GladosEventHandler(AsyncEventHandler):
             await self.write_event(
                 Error(text=str(e), code="TTSProcessingError").event()
             )
-        # Update buffer and notify when it becomes empty
-
-        # Notify that processing is complete
-
-        self.buffer_empty_event.set()
+        await self.write_event(AudioStop().event())
         # Stop the audio stream when done
 
         _LOGGER.debug("Completed request")
