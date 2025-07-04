@@ -29,29 +29,29 @@ class SentenceBoundaryDetector:
             match = SENTENCE_BOUNDARY_RE.search(self.remaining_text)
             if not match:
                 break
-
             match_text = match.group(0)
 
             # If it's the first sentence or continuation without abbreviation
+
             if not self.current_sentence:
                 self.current_sentence = match_text
             elif ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 self.current_sentence += match_text
             else:
                 # Yield and clear the current sentence
+
                 yield remove_asterisks(self.current_sentence.strip())
                 processed_chunks.append(self.current_sentence)  # Add processed chunk
                 self.current_sentence = match_text
-
             if not ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 yield remove_asterisks(self.current_sentence.strip())
                 processed_chunks.append(self.current_sentence)  # Add processed chunk
                 self.current_sentence = ""
-
             # Update the remaining text
-            self.remaining_text = self.remaining_text[match.end():]
 
+            self.remaining_text = self.remaining_text[match.end() :]
         # Clear processed chunks
+
         return processed_chunks
 
     def finish(self) -> str:
@@ -60,6 +60,7 @@ class SentenceBoundaryDetector:
         self.remaining_text = ""
         self.current_sentence = ""
         return remove_asterisks(text)
+
 
 def remove_asterisks(text: str) -> str:
     """Remove *asterisks* surrounding **words**"""

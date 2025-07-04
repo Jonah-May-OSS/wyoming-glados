@@ -7,6 +7,7 @@ from gladostts.glados import TTSRunner  # Import your TTSRunner from glados.py
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class GladosProcess:
     """Info for a running GLaDOS process (one TTS instance)."""
 
@@ -22,18 +23,21 @@ class GladosProcess:
     async def run_tts(self, text: str, alpha: float = 1.0):
         """Process the text and handle TTS output."""
         audio_segment = self.runner.run_tts(text, alpha)
-        
+
         # Process the audio segment here
         # For example, you can yield the audio as bytes, or save it to a file
+
         yield audio_segment.raw_data, audio_segment.frame_rate, audio_segment.sample_width, audio_segment.channels
-    
+
     async def stream_tts(self, text: str, alpha: float = 1.0):
         """Process the text and handle TTS output."""
         audio_segment = self.runner.stream_tts(text, alpha)
-        
+
         # Process the audio segment here
         # For example, you can yield the audio as bytes, or save it to a file
+
         yield audio_segment.raw_data, audio_segment.frame_rate, audio_segment.sample_width, audio_segment.channels
+
 
 class GladosProcessManager:
     """Manages GLaDOS TTS process, initializes and interacts with TTSRunner."""
@@ -49,14 +53,16 @@ class GladosProcessManager:
         """Get the TTS process for the given voice or initialize a new one."""
         if voice_name is None:
             voice_name = "default"  # Assuming default voice if none provided
-
         async with self.processes_lock:  # Lock access to the process dictionary
-            if voice_name not in self.processes or self.processes[voice_name].runner != self.runner:
+            if (
+                voice_name not in self.processes
+                or self.processes[voice_name].runner != self.runner
+            ):
                 # Initialize a new process if it doesn't exist
+
                 _LOGGER.debug(f"Initializing new process for voice: {voice_name}")
                 self.processes[voice_name] = GladosProcess(voice_name, self.runner)
-
             # Update last used timestamp
-            self.processes[voice_name].last_used = time.monotonic_ns()
 
+            self.processes[voice_name].last_used = time.monotonic_ns()
         return self.processes[voice_name]

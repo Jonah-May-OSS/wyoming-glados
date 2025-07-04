@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 """Utility for running the GLaDOS TTS server."""
 
 import argparse
@@ -14,6 +15,7 @@ from pathlib import Path
 import warnings
 
 # 1) hide that nested-tensor warning so it never pollutes your logs
+
 warnings.filterwarnings(
     "ignore",
     message="enable_nested_tensor is True, but self.use_nested_tensor is False",
@@ -21,6 +23,7 @@ warnings.filterwarnings(
 )
 
 # 2) actually turn it off under the hood
+
 import torch.nn.modules.transformer as _tfm
 
 _tfm.enable_nested_tensor = False
@@ -32,10 +35,12 @@ from wyoming.server import AsyncServer
 
 # Configure logging
 
+
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 # Ensure 'gladostts' module is importable
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -112,15 +117,17 @@ async def main() -> None:
     args = parser.parse_args()
 
     # Setup logging
+
     setup_logging(args.debug, args.log_format)
 
     # Validate models directory
+
     models_dir = args.models_dir.resolve()
     if not models_dir.exists():
         logger.error("Models directory does not exist: %s", models_dir)
         sys.exit(1)
-
     # Define TTS voices
+
     voice_attribution = Attribution(
         name="R2D2FISH", url="https://github.com/R2D2FISH/glados-tts"
     )
@@ -136,6 +143,7 @@ async def main() -> None:
     ]
 
     # Define TTS program information (streaming support enabled)
+
     wyoming_info = Info(
         tts=[
             TtsProgram(
@@ -151,6 +159,7 @@ async def main() -> None:
     )
 
     # Initialize GLaDOS TTS
+
     logger.debug("Initializing GLaDOS TTS engine...")
     glados_tts = TTSRunner(
         use_p1=False,
@@ -160,27 +169,30 @@ async def main() -> None:
     logger.debug("GLaDOS TTS engine initialized successfully.")
 
     # Sanity-check RNN weights for cuDNN
+
     try:
         glados_tts.glados.rnn.flatten_parameters()
         logger.debug("Flattened RNN weights for best cuDNN performance.")
     except Exception:
         logger.debug("No .rnn to flatten (or already contiguous).")
-
     # Ensure NLTK 'punkt' data is downloaded
+
     try:
         nltk_data.find("tokenizers/punkt_tab")
         logger.debug("NLTK 'punkt' tokenizer data is already available.")
     except LookupError:
         logger.debug("Downloading NLTK 'punkt' tokenizer data...")
         nltk.download("punkt_tab", quiet=not args.debug)
-
     # Create the GladosProcessManager instance
+
     process_manager = GladosProcessManager(glados_tts)
 
     # Make sure default voice is loaded.
+
     await process_manager.get_process()
 
     # Start the server with the updated handler
+
     server = AsyncServer.from_uri(args.uri)
     logger.info("Server started and listening on %s", args.uri)
 
@@ -192,6 +204,7 @@ async def main() -> None:
     )
 
     # Run the server
+
     try:
         await server.run(handler_factory)
     except Exception as e:
@@ -201,6 +214,7 @@ async def main() -> None:
 
 def run():
     asyncio.run(main())
+
 
 if __name__ == "__main__":
     try:
