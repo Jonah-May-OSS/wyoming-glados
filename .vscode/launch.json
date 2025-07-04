@@ -12,6 +12,7 @@
       "justMyCode": true,
       "args": [
         "--uri", "tcp://0.0.0.0:10201",
+        "--streaming",
         "--debug"
       ]
     }

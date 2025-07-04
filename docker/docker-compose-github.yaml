@@ -3,11 +3,13 @@ services:
   wyoming-glados:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.igpu
     image: wyoming-glados
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    environment:
+      - streaming=true
     restart: unless-stopped
     deploy:
       resources:
