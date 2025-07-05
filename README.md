@@ -2,11 +2,9 @@
 
 [Wyoming protocol](https://github.com/rhasspy/wyoming) server for the [GLaDOS](https://github.com/R2D2FISH/glados-tts) text to speech system from R2D2FISH. It uses CUDA acceleration if supported.
 
-The server part is a heavily stripped down version of [wyoming-piper](https://github.com/rhasspy/wyoming-piper) and the gladostts folder is a [Git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) of R2D2FISH's repo. It also leverages TensorRT for the vocoder model. This conversion happens the first time the server launches, and requires roughly 5650 MB of VRAM. Once the .ts model file has been built, only about 700 MB should be used.
+The server part is a heavily stripped down version of [wyoming-piper](https://github.com/rhasspy/wyoming-piper) and the gladostts folder is a [Git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) of R2D2FISH's repo. It also leverages TensorRT for the vocoder model. This conversion happens the first time the server launches and requires roughly 5650 MB of VRAM. Once the .ts model file has been built, only about 575 MB should be used.
 
 TODOS:
-- Can glados-new.pt be converted to TensorRT like the vocoder?
-- Save vocoder-trt.ts to the glados-tts repo fork, download it as part of download.py instead of building it on first run
 - Fix ARM64 builds so Docker images are created and published
 
 ## Usage
@@ -25,8 +23,11 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    volumes:
+      - ./models:/usr/src/models:rw
     environment:
-      - streaming=true
+      - STREAMING=true
+      - DEBUG=false
     restart: unless-stopped
     deploy:
       resources:
@@ -50,9 +51,10 @@ docker run \
   --gpus all \                                # expose all NVIDIA GPUs
   --name wyoming-glados \                     # give the container a name
   -d \                                        # run in detached mode
+  -v "$(pwd)/models":/usr/src/models:rw \     # set directory to download model files to so they persist for easy container updates
   -p 10201:10201 \                            # map port 10201 → 10201
   -e DEVICE=cuda \                            # `cuda` or `cpu`
-  -e streaming=true \                         # Enable partial streaming
+  -e STREAMING=true \                         # Enable partial streaming
   captnspdr/wyoming-glados:latest-amd64
 ```
 

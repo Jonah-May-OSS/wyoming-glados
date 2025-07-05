@@ -6,6 +6,7 @@ cd /usr/src/wyoming-glados || { echo "Unable to cd into /usr/src/wyoming-glados"
 
 STREAMING=${STREAMING:-true}
 DEBUG=${DEBUG:-false}
+MODEL_DIR=${MODEL_DIR:-"/usr/src/models"}
 
 # Initialize empty flags
 STREAMING_FLAG=""
@@ -22,5 +23,6 @@ fi
 
 python __main__.py \
     --uri 'tcp://0.0.0.0:10201' \
-    $DEBUG_FLAG \
-    $STREAMING_FLAG
+    --models-dir ${MODEL_DIR} \
+    ${DEBUG_FLAG} \
+    ${STREAMING_FLAG}

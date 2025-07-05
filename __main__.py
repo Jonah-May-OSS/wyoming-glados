@@ -6,6 +6,8 @@
 import argparse
 import asyncio
 import logging
+import subprocess
+import os
 import sys
 import time
 from typing import Optional
@@ -16,6 +18,7 @@ import warnings
 
 # 1) hide that nested-tensor warning so it never pollutes your logs
 
+
 warnings.filterwarnings(
     "ignore",
     message="enable_nested_tensor is True, but self.use_nested_tensor is False",
@@ -23,6 +26,7 @@ warnings.filterwarnings(
 )
 
 # 2) actually turn it off under the hood
+
 
 import torch.nn.modules.transformer as _tfm
 
@@ -85,7 +89,7 @@ async def main() -> None:
     parser.add_argument(
         "--models-dir",
         type=Path,
-        default=SCRIPT_DIR / "gladostts" / "models",
+        default=os.environ.get("MODELS_DIR", "/usr/src/models"),
         help="Directory containing the model files",
     )
     parser.add_argument(
@@ -120,13 +124,33 @@ async def main() -> None:
 
     setup_logging(args.debug, args.log_format)
 
-    # Validate models directory
+    # Always (re)download models before startup
 
-    models_dir = args.models_dir.resolve()
-    if not models_dir.exists():
-        logger.error("Models directory does not exist: %s", models_dir)
-        sys.exit(1)
-    # Define TTS voices
+    try:
+        # Add timeout to prevent hanging
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "download.py"),
+                "--model-dir",
+                str(args.models_dir),
+                *(["--debug"] if args.debug else []),
+            ],
+            timeout=300,  # 5 minute timeout
+            check=True,
+        )
+        logger.info("Models downloaded (or already up-to-date).")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        error_msg = (
+            f"timeout after 300s"
+            if isinstance(e, subprocess.TimeoutExpired)
+            else f"exit {e.returncode}"
+        )
+        logger.error("Model download failed (%s); aborting.", error_msg)
+    # Exit if download.py failed
+
+    # Define voice attribution and voices
 
     voice_attribution = Attribution(
         name="R2D2FISH", url="https://github.com/R2D2FISH/glados-tts"
@@ -164,7 +188,7 @@ async def main() -> None:
     glados_tts = TTSRunner(
         use_p1=False,
         log=args.debug,
-        models_dir=models_dir,
+        models_dir=args.models_dir,
     )
     logger.debug("GLaDOS TTS engine initialized successfully.")
 

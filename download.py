@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 """Utility for downloading GLaDOS TTS models."""
 
 import argparse
@@ -12,7 +13,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import urlopen
 
 DEFAULT_URL = (
-    "https://github.com/nalf3in/glados-tts/releases/download/v0.1.0-alpha/{file}"
+    "https://github.com/Jonah-May-OSS/glados-tts/releases/download/1.0.0/{file}"
 )
 DEFAULT_MODEL_DIR = "./gladostts/models"
 
@@ -59,17 +60,30 @@ def ensure_model_exists(download_dir: Path, base_url: str):
     # List of model files and their expected MD5 checksums
 
     model_files = [
-        {"filename": "glados-new.pt", "md5": "d6945ffd96ee0619d0d49a581b5b83ad"},
-        {"filename": "glados.pt", "md5": "11383a00f7ddfc8f80285ce3aba2ebb0"},
+        {
+            "filename": "glados-new.pt",
+            "md5": "d6945ffd96ee0619d0d49a581b5b83ad",
+        },
+        {
+            "filename": "tacotron-trt.ts",
+            "md5": "b0d3d95a30bfecb2904be498767636ff",
+        },
         {
             "filename": "en_us_cmudict_ipa_forward.pt",
             "md5": "33887f7f579f010ce4463534306120b0",
         },
-        {"filename": "emb/glados_p2.pt", "md5": "ff2ad1438e9acb1f8e8607864c239ffc"},
-        {"filename": "emb/glados_p1.pt", "md5": "e0ffe67a6f53c4ff0b3952fc678946d9"},
-        {"filename": "vocoder-gpu.pt", "md5": "d35c13c01d2cacd348aa216649bbfac3"},
-        {"filename": "vocoder-cpu-hq.pt", "md5": "e8842210dc989e351c2e50614ff55f46"},
-        {"filename": "vocoder-cpu-lq.pt", "md5": "cfd048af8bb8190995eac7b95bf7367e"},
+        {
+            "filename": "emb/glados_p2.pt",
+            "md5": "ff2ad1438e9acb1f8e8607864c239ffc",
+        },
+        {
+            "filename": "vocoder-gpu.pt",
+            "md5": "d35c13c01d2cacd348aa216649bbfac3",
+        },
+        {
+            "filename": "vocoder-trt.ts",
+            "md5": "57990678b466251884a43ccc2ca7dda4",
+        },
     ]
 
     for model in model_files:

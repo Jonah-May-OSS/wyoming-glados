@@ -5,8 +5,11 @@ services:
     container_name: wyoming-glados
     ports:
       - 10201:10201
+    volumes:
+      - ./models:/usr/src/models:rw
     environment:
-      - streaming=true
+      - STREAMING=true
+      - DEBUG=false
     restart: unless-stopped
     deploy:
       resources:
