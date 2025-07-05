@@ -19,7 +19,6 @@ fi
 
 if [[ "${DEBUG,,}" == "true" ]]; then
     DEBUG_FLAG="--debug"
-    DOWNLOAD_DEBUG_FLAG="--debug"
 fi
 
 python __main__.py \

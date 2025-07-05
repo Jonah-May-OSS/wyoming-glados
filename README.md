@@ -2,7 +2,7 @@
 
 [Wyoming protocol](https://github.com/rhasspy/wyoming) server for the [GLaDOS](https://github.com/R2D2FISH/glados-tts) text to speech system from R2D2FISH. It uses CUDA acceleration if supported.
 
-The server part is a heavily stripped down version of [wyoming-piper](https://github.com/rhasspy/wyoming-piper) and the gladostts folder is a [Git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) of R2D2FISH's repo. It also leverages TensorRT for the vocoder model. This conversion happens the first time the server launches, and requires roughly 5650 MB of VRAM. Once the .ts model file has been built, only about 575 MB should be used.
+The server part is a heavily stripped down version of [wyoming-piper](https://github.com/rhasspy/wyoming-piper) and the gladostts folder is a [Git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) of R2D2FISH's repo. It also leverages TensorRT for the vocoder model. This conversion happens the first time the server launches and requires roughly 5650 MB of VRAM. Once the .ts model file has been built, only about 575 MB should be used.
 
 TODOS:
 - Fix ARM64 builds so Docker images are created and published

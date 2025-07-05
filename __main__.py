@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import logging
 import subprocess
+import os
 import sys
 import time
 from typing import Optional
@@ -88,7 +89,7 @@ async def main() -> None:
     parser.add_argument(
         "--models-dir",
         type=Path,
-        default="/usr/src/models",
+        default=os.environ.get("MODELS_DIR", "/usr/src/models"),
         help="Directory containing the model files",
     )
     parser.add_argument(
@@ -126,19 +127,22 @@ async def main() -> None:
     # Always (re)download models before startup
 
     try:
-        subprocess.check_call(
+        # Add timeout to prevent hanging
+        result = subprocess.run(
             [
                 sys.executable,
                 str(SCRIPT_DIR / "download.py"),
                 "--model-dir",
                 str(args.models_dir),
                 *(["--debug"] if args.debug else []),
-            ]
+            ],
+            timeout=300,  # 5 minute timeout
+            check=True
         )
         logger.info("Models downloaded (or already up-to-date).")
-    except subprocess.CalledProcessError as e:
-        logger.error("Model download failed (exit %d); aborting.", e.returncode)
-        sys.exit(1)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        error_msg = f"timeout after 300s" if isinstance(e, subprocess.TimeoutExpired) else f"exit {e.returncode}"
+        logger.error("Model download failed (%s); aborting.", error_msg)
     # Exit if download.py failed
 
     # Define voice attribution and voices

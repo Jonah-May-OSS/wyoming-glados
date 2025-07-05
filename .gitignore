@@ -15,5 +15,3 @@ htmlcov
 __pycache__/
 
 /dist/
-
-/models/
