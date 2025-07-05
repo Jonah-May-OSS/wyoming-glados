@@ -6,7 +6,7 @@
       "name": "Python: glados wyoming",
       "type": "debugpy",
       "request": "launch",
-      "python": "${command:python.interpreterPath}",
+      "python": "${workspaceFolder}/.venv/bin/python",
       "program": "${workspaceFolder}/__main__.py",
       "console": "integratedTerminal",
       "justMyCode": true,
