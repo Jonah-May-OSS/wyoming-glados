@@ -4,7 +4,6 @@ set -e
 
 cd /usr/src/wyoming-glados || { echo "Unable to cd into /usr/src/wyoming-glados"; exit 1; }
 
-DEVICE=${DEVICE:-cuda}
 STREAMING=${STREAMING:-true}
 DEBUG=${DEBUG:-false}
 
@@ -24,5 +23,4 @@ fi
 python __main__.py \
     --uri 'tcp://0.0.0.0:10201' \
     $DEBUG_FLAG \
-    $STREAMING_FLAG \
-    --device="$DEVICE"
+    $STREAMING_FLAG
