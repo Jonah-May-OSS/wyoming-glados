@@ -7,6 +7,7 @@ The server part is a heavily stripped down version of [wyoming-piper](https://gi
 TODOS:
 - Can glados-new.pt be converted to TensorRT like the vocoder?
 - Save vocoder-trt.ts to the glados-tts repo fork, download it as part of download.py instead of building it on first run
+- Fix ARM64 builds so Docker images are created and published
 
 ## Usage
 
@@ -36,44 +37,6 @@ services:
               capabilities: [gpu]
 ```
 
-For ARM64 with discrete GPUs:
-```yaml
-version: "3"
-services:
-  wyoming-glados:
-    image: captnspdr/wyoming-glados:latest-arm64
-    container_name: wyoming-glados
-    ports:
-      - 10201:10201
-    environment:
-      - streaming=true
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-```
-
-For ARM64 with an iGPU like Jetson devices:
-```yaml
-version: "3"
-services:
-  wyoming-glados:
-    image: captnspdr/wyoming-glados:latest-igpu
-    container_name: wyoming-glados
-    ports:
-      - 10201:10201
-    restart: unless-stopped
-    runtime: nvidia
-    environment:
-      - streaming=true
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-```
-
 
 ### Docker (Latest tag on Docker Hub)
 1. Clone this repository
@@ -93,44 +56,11 @@ docker run \
   captnspdr/wyoming-glados:latest-amd64
 ```
 
-For ARM64 with dGPU:
-
-```bash
-docker run \
-  --gpus all \                                # expose all NVIDIA GPUs
-  --name wyoming-glados \                     # give the container a name
-  -d \                                        # run in detached mode
-  -p 10201:10201 \                            # map port 10201 → 10201
-  -e DEVICE=cuda \                            # `cuda` or `cpu`
-  -e streaming=true \                         # Enable partial streaming
-  captnspdr/wyoming-glados:latest-arm64
-```
-
-For ARM64 with iGPU:
-
-```bash
-docker run \
-  --gpus all \                                # expose all NVIDIA GPUs
-  --name wyoming-glados \                     # give the container a name
-  -d \                                        # run in detached mode
-  -p 10201:10201 \                            # map port 10201 → 10201
-  -e DEVICE=cuda \                            # `cuda` or `cpu`
-  -e streaming=true \                         # Enable partial streaming
-  captnspdr/wyoming-glados:latest-igpu
-```
-
-
-
-### Docker (Latest GitHub commit, ARM64 and AMD64 with dGPU)
+### Docker (Latest GitHub commit, AMD64 with dGPU)
 1. Clone this repository
 2. Browse to the repository docker folder
 3. Run ``docker compose -f docker-compose-github.yaml up -d``
 
-
-### Docker (Latest GitHub commit, ARM64 with iGPU)
-1. Clone this repository
-2. Browse to the repository docker folder
-3. Run ``docker compose -f docker-compose-github-igpu.yaml up -d``
 
 ## Connecting to Home Assistant
 ### Adding the TTS engine to Home Assistant
