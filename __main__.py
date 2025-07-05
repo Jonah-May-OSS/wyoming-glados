@@ -128,6 +128,7 @@ async def main() -> None:
 
     try:
         # Add timeout to prevent hanging
+
         result = subprocess.run(
             [
                 sys.executable,
@@ -137,11 +138,15 @@ async def main() -> None:
                 *(["--debug"] if args.debug else []),
             ],
             timeout=300,  # 5 minute timeout
-            check=True
+            check=True,
         )
         logger.info("Models downloaded (or already up-to-date).")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        error_msg = f"timeout after 300s" if isinstance(e, subprocess.TimeoutExpired) else f"exit {e.returncode}"
+        error_msg = (
+            f"timeout after 300s"
+            if isinstance(e, subprocess.TimeoutExpired)
+            else f"exit {e.returncode}"
+        )
         logger.error("Model download failed (%s); aborting.", error_msg)
     # Exit if download.py failed
 
