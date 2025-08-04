@@ -10,9 +10,10 @@ on:
       - '.github/**'
       - '.vscode/**'
       - 'docker/**'
-      - 'renovate.json'
       - 'GitReleaseManager.yaml'
-      - 'readme.md'
+      - 'tests/**'
+      - '**/*.md'
+      - 'renovate.json'
 
 jobs:
   test_linux:
