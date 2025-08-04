@@ -1,16 +1,20 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
+  "extends": ["config:recommended"],
   "assignees": ["JonahMMay"],
   "labels": ["renovate"],
-  "configMigration": true,
-  "forkProcessing": "enabled",
   "packageRules": [
-  {
-    "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-    "automerge": true
-  }
- ]
+    {
+      "groupName": "tensorrt",
+      "automerge": true,
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
+      "matchSourceUrls": [
+        "https://github.com/nvidia/**"
+      ]
+    },
+    {
+      "automerge": true,
+      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"]
+    }
+  ]
 }
