@@ -11,7 +11,7 @@
       "automerge": true,
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
       "matchSourceUrls": [
-        "https://github.com/pytorch**"
+        "https://github.com/pytorch/**"
       ]
     },
     {
