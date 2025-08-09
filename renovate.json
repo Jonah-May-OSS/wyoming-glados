@@ -7,7 +7,7 @@
   "forkProcessing": "enabled",
   "packageRules": [
     {
-      "groupName": "PyTorch"
+      "groupName": "PyTorch",
       "automerge": true,
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
       "matchSourceUrls": [
