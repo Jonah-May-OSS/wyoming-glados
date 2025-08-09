@@ -7,11 +7,11 @@
   "forkProcessing": "enabled",
   "packageRules": [
     {
-      "groupName": "tensorrt",
+      "groupName": "PyTorch"
       "automerge": true,
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
       "matchSourceUrls": [
-        "https://github.com/nvidia/**"
+        "https://github.com/pytorch**"
       ]
     },
     {
