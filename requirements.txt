@@ -1,4 +1,4 @@
-wyoming==1.7.2
+wyoming==1.8.0
 deep_phonemizer~=0.0.19
 Flask~=3.1.2
 inflect~=7.5.0
