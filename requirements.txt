@@ -9,7 +9,7 @@ pydub~=0.25.1
 scipy~=1.16.2
 torch~=2.8.0
 torch-tensorrt~=2.8.0
-torchvision~=0.23.0
+torchvision~=0.24.0
 tqdm~=4.67.1
 Unidecode~=1.4.0
 audioop-lts~=0.2.2; python_version>='3.13'
