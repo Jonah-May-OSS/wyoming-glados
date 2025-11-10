@@ -8,7 +8,6 @@ import hashlib
 import logging
 import shutil
 from pathlib import Path
-from typing import Union
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import urlopen
 
@@ -104,9 +103,10 @@ def ensure_model_exists(download_dir: Path, base_url: str):
             filename = model_file.split("/")[-1]
             model_url = base_url.format(file=filename)
             _LOGGER.info("Downloading %s to %s", model_url, model_file_path)
-            with urlopen(_quote_url(model_url)) as response, open(
-                model_file_path, "wb"
-            ) as out_file:
+            with (
+                urlopen(_quote_url(model_url)) as response,
+                open(model_file_path, "wb") as out_file,
+            ):
                 shutil.copyfileobj(response, out_file)
             _LOGGER.info("Downloaded %s", model_file_path)
 
