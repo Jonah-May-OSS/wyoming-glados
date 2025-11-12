@@ -5,6 +5,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import subprocess
@@ -46,8 +47,6 @@ logger.addHandler(logging.NullHandler())
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-
-import contextlib
 
 from gladostts.glados import TTSRunner
 

@@ -79,4 +79,4 @@ The tests mock heavy dependencies like `wyoming`, `gladostts`, and CUDA-related 
 
 ## Continuous Integration
 
-Tests and linting checks run automatically on pull requests via GitHub Actions. See `.github/workflows/pytest-ruff.yml` for the CI configuration.
+Tests and linting checks run automatically on pull requests via GitHub Actions. See `.github/workflows/test.yml` for the CI configuration.

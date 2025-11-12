@@ -7,11 +7,12 @@ via: pip install regex
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Skip all tests if regex is not available
-pytest = __import__("pytest")
 regex = pytest.importorskip("regex")
 
 from server.sentence_boundary import (  # noqa: E402

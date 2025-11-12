@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-pytest = __import__("pytest")
 
 
 class TestGladosProcessLogic:
