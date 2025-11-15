@@ -5,16 +5,15 @@
 
 import argparse
 import asyncio
+import contextlib
 import logging
-import subprocess
 import os
+import subprocess
 import sys
 import time
-from typing import Optional
+import warnings
 from functools import partial
 from pathlib import Path
-
-import warnings
 
 # 1) hide that nested-tensor warning so it never pollutes your logs
 
@@ -50,6 +49,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from gladostts.glados import TTSRunner
+
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 
@@ -57,9 +57,7 @@ from server.process import GladosProcessManager
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
 
-    def formatTime(
-        self, record: logging.LogRecord, datefmt: Optional[str] = None
-    ) -> str:
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
         ct = record.created
         t = time.localtime(ct)
         s = time.strftime("%Y-%m-%d %H:%M:%S", t)
@@ -129,7 +127,7 @@ async def main() -> None:
     try:
         # Add timeout to prevent hanging
 
-        result = subprocess.run(
+        subprocess.run(
             [
                 sys.executable,
                 str(SCRIPT_DIR / "download.py"),
@@ -143,7 +141,7 @@ async def main() -> None:
         logger.info("Models downloaded (or already up-to-date).")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         error_msg = (
-            f"timeout after 300s"
+            "timeout after 300s"
             if isinstance(e, subprocess.TimeoutExpired)
             else f"exit {e.returncode}"
         )
@@ -241,7 +239,5 @@ def run():
 
 
 if __name__ == "__main__":
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         run()
-    except KeyboardInterrupt:
-        pass

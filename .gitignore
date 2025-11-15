@@ -15,3 +15,10 @@ htmlcov
 __pycache__/
 
 /dist/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
