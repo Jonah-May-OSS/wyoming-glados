@@ -21,8 +21,8 @@ from pathlib import Path
 # 2. Third-party libraries
 # -------------------------
 import nltk
-import torch.nn.modules.transformer as _tfm
 from nltk import data as nltk_data
+import torch.nn.modules.transformer as _tfm
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
