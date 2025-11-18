@@ -28,10 +28,10 @@ from server.sentence_boundary import (  # noqa: E402
     remove_asterisks,
 )
 
-
 # -------------------------------------------------------------------
 # remove_asterisks tests
 # -------------------------------------------------------------------
+
 
 class TestRemoveAsterisks:
     def test_remove_word_asterisks(self):
@@ -63,8 +63,8 @@ class TestRemoveAsterisks:
 # SentenceBoundaryDetector Tests
 # -------------------------------------------------------------------
 
-class TestSentenceBoundaryDetector:
 
+class TestSentenceBoundaryDetector:
     def test_single_sentence(self):
         detector = SentenceBoundaryDetector()
         out = list(detector.add_chunk("Hello world. "))
