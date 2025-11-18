@@ -1,30 +1,33 @@
-import sys
-import pytest
 import argparse
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from server.handler import GladosEventHandler
-from server.process import GladosProcessManager, GladosProcess
-from server.sentence_boundary import SentenceBoundaryDetector
 from wyoming.event import Event
 from wyoming.info import Describe, Info
 from wyoming.tts import (
     Synthesize,
-    SynthesizeStart,
     SynthesizeChunk,
+    SynthesizeStart,
     SynthesizeStop,
 )
 
+from server.handler import GladosEventHandler
+from server.process import GladosProcess, GladosProcessManager
+from server.sentence_boundary import SentenceBoundaryDetector
 
 # ---------------------------------------------------------------------------
 # Proper async writer
 # ---------------------------------------------------------------------------
 
+
 class DummyAsyncWriter:
     """A real async writer as required by AsyncEventHandler."""
+
     def __init__(self):
         self.events = []
 
@@ -38,12 +41,14 @@ def make_async_gen(*items):
         for item in items:
             yield item
         await asyncio.sleep(0)  # prevents StopIteration blowing up
+
     return gen()
 
 
 # ---------------------------------------------------------------------------
 # Factory to build a *correct* GladosEventHandler
 # ---------------------------------------------------------------------------
+
 
 def build_handler(streaming=False):
     dummy_info = Info()
@@ -64,7 +69,7 @@ def build_handler(streaming=False):
         wyoming_info=dummy_info,
         cli_args=cli_args,
         process_manager=mgr,
-        writer=writer,     # important!
+        writer=writer,  # important!
         reader=None,
     )
 
@@ -74,6 +79,7 @@ def build_handler(streaming=False):
 # ---------------------------------------------------------------------------
 # TESTS
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_handle_describe():
