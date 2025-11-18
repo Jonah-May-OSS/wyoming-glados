@@ -6,13 +6,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-import download
 
+import download
 from download import (
     _quote_url,
+    ensure_model_exists,
     get_file_hash,
     is_valid_file,
-    ensure_model_exists,
 )
 
 
