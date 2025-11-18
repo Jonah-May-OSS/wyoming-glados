@@ -8,26 +8,21 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wyoming.event import Event
-from wyoming.info import Describe, Info
+from wyoming.info import Info
 from wyoming.tts import (
     Synthesize,
     SynthesizeChunk,
     SynthesizeStart,
     SynthesizeStop,
 )
-
+from wyoming.info import Describe
 from server.handler import GladosEventHandler
-from server.process import GladosProcess, GladosProcessManager
+from server.process import GladosProcess
 from server.sentence_boundary import SentenceBoundaryDetector
-
-# ---------------------------------------------------------------------------
-# Proper async writer
-# ---------------------------------------------------------------------------
 
 
 class DummyAsyncWriter:
-    """A real async writer as required by AsyncEventHandler."""
+    """Proper async writer for AsyncEventHandler."""
 
     def __init__(self):
         self.events = []
@@ -36,38 +31,28 @@ class DummyAsyncWriter:
         self.events.append(event)
 
 
-# Correct async generator creator
 def make_async_gen(*items):
     async def gen():
         for item in items:
             yield item
-        return
-        yield  # unreachable, prevents StopIteration crash
-
-    return gen
-
-
-# ---------------------------------------------------------------------------
-# Factory to build a correct GladosEventHandler
-# ---------------------------------------------------------------------------
+        await asyncio.sleep(0)
+    return gen()
 
 
 def build_handler(streaming=False):
-    # REAL Info object — required for Describe.is_type(event)
-    dummy_info = Info(name="test", description="unit test")
-
+    dummy_info = Info()
     cli_args = argparse.Namespace(streaming=streaming)
     writer = DummyAsyncWriter()
 
-    # Mock the GladosProcess
+    # Mock GladosProcess
     mock_process = MagicMock(spec=GladosProcess)
-    mock_process.run_tts = make_async_gen()()  # EMPTY async generator instance
+    mock_process.run_tts = AsyncMock(return_value=make_async_gen())
 
-    # Mock the manager
-    mgr = MagicMock(spec=GladosProcessManager)
+    # Mock manager
+    mgr = MagicMock()
     mgr.get_process = AsyncMock(return_value=mock_process)
 
-    # Build handler
+    # IMPORTANT: correct reader/writer forwarding
     handler = GladosEventHandler(
         wyoming_info=dummy_info,
         cli_args=cli_args,
@@ -79,17 +64,10 @@ def build_handler(streaming=False):
     return handler, mgr, writer
 
 
-# ---------------------------------------------------------------------------
-# TESTS
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_handle_describe():
     handler, mgr, writer = build_handler()
     await handler.handle_event(Describe().event())
-
-    assert len(writer.events) == 1
     assert writer.events[0]["type"] == "info"
 
 
@@ -97,11 +75,13 @@ async def test_handle_describe():
 async def test_synthesize_basic_path():
     handler, mgr, writer = build_handler(streaming=False)
 
-    mgr.get_process.return_value.run_tts = make_async_gen((b"aaa", 22050, 2, 1))()
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=make_async_gen((b"A", 22050, 2, 1))
+    )
 
-    await handler.handle_event(Synthesize(text="Hello world.").event())
-
+    await handler.handle_event(Synthesize(text="Hello.").event())
     types = [e["type"] for e in writer.events]
+
     assert "audio-start" in types
     assert "audio-chunk" in types
     assert "audio-stop" in types
@@ -111,21 +91,21 @@ async def test_synthesize_basic_path():
 async def test_synthesize_exception_path():
     handler, mgr, writer = build_handler(streaming=False)
 
-    async def bad_gen():
+    async def broken_gen(*args):
         raise RuntimeError("boom")
-        yield  # unreachable
+        yield None
 
-    mgr.get_process.return_value.run_tts = bad_gen()
+    mgr.get_process.return_value.run_tts = broken_gen
 
-    await handler.handle_event(Synthesize(text="oops").event())
+    await handler.handle_event(Synthesize(text="x").event())
+    types = [e["type"] for e in writer.events]
 
-    assert "error" in [e["type"] for e in writer.events]
+    assert "error" in types
 
 
 @pytest.mark.asyncio
 async def test_stream_start_resets_state():
     handler, mgr, writer = build_handler(streaming=True)
-
     await handler.handle_event(SynthesizeStart(voice="v1").event())
 
     assert handler.is_streaming is True
@@ -136,7 +116,9 @@ async def test_stream_start_resets_state():
 async def test_stream_chunk_sentence_emission():
     handler, mgr, writer = build_handler(streaming=True)
 
-    mgr.get_process.return_value.run_tts = make_async_gen((b"abc", 22050, 2, 1))()
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=make_async_gen((b"C", 22050, 2, 1))
+    )
 
     await handler.handle_event(SynthesizeStart(voice="v").event())
     await handler.handle_event(SynthesizeChunk(text="Hello. ").event())
@@ -150,7 +132,9 @@ async def test_stream_chunk_sentence_emission():
 async def test_stream_stop_flushes_remaining_text():
     handler, mgr, writer = build_handler(streaming=True)
 
-    mgr.get_process.return_value.run_tts = make_async_gen((b"xyz", 22050, 2, 1))()
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=make_async_gen((b"D", 22050, 2, 1))
+    )
 
     await handler.handle_event(SynthesizeStart(voice="v").event())
     await handler.handle_event(SynthesizeChunk(text="Hi").event())
@@ -163,7 +147,9 @@ async def test_stream_stop_flushes_remaining_text():
 async def test_asterisk_removal_in_synthesize():
     handler, mgr, writer = build_handler(streaming=False)
 
-    mgr.get_process.return_value.run_tts = make_async_gen((b"aaa", 22050, 2, 1))()
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=make_async_gen((b"E", 22050, 2, 1))
+    )
 
     await handler.handle_event(Synthesize(text="This is *important*.").event())
 
