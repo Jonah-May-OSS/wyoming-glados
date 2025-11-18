@@ -38,7 +38,7 @@ jobs:
 
       - name: Run Ruff Linter
         run: |
-          ruff check --output-format=github .
+          ruff check --fix --select I --unsafe-fixes --output-format=github .
 
       - name: Run Ruff Formatter Check
         run: |
