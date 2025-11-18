@@ -42,11 +42,11 @@ class SentenceBoundaryDetector:
                 self.current_sentence = ""
 
             # Remove used portion from buffer
-            self.remaining_text = self.remaining_text[match.end():].lstrip()
+            self.remaining_text = self.remaining_text[match.end() :].lstrip()
 
     def finish(self) -> str:
         """Finalize and return the last sentence, clearing state."""
-        combined = (self.current_sentence + self.remaining_text)
+        combined = self.current_sentence + self.remaining_text
 
         # reset state
         self.remaining_text = ""
