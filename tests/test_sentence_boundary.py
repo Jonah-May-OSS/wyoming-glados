@@ -12,6 +12,7 @@ match the library's real behavior.
 
 import sys
 from pathlib import Path
+
 import pytest
 
 # Add parent directory to path for imports
@@ -25,10 +26,10 @@ from server.sentence_boundary import (  # noqa: E402
     remove_asterisks,
 )
 
-
 # -------------------------------------------------------------------
 # remove_asterisks tests
 # -------------------------------------------------------------------
+
 
 class TestRemoveAsterisks:
     """Test the remove_asterisks function."""
@@ -64,6 +65,7 @@ class TestRemoveAsterisks:
 # -------------------------------------------------------------------
 # SentenceBoundaryDetector tests (updated to match real behavior)
 # -------------------------------------------------------------------
+
 
 class TestSentenceBoundaryDetector:
     """Test the SentenceBoundaryDetector class."""

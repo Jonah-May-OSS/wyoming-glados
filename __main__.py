@@ -21,8 +21,8 @@ from pathlib import Path
 # 2. Third-party libraries
 # -------------------------
 import nltk
-from nltk import data as nltk_data
 import torch.nn.modules.transformer as _tfm
+from nltk import data as nltk_data
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
@@ -53,6 +53,7 @@ _tfm.enable_nested_tensor = False
 # logger
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
+
 
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
