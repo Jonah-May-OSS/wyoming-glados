@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+exclude = [
+    "gladostts",  # Exclude submodule from linting
+]
 
 [tool.ruff.lint]
 select = [
