@@ -36,9 +36,23 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run Ruff Linter
+      - name: Run Ruff Linter (Auto-Fix Imports)
         run: |
           ruff check --fix --select I --unsafe-fixes --output-format=github .
+
+      - name: Run Ruff Formatter (Auto-Fix)
+        run: |
+          ruff format .
+
+      - name: Commit Ruff Fixes
+        if: always()
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "chore(ci): auto-fix ruff formatting + imports"
+          fi
 
       - name: Run Ruff Formatter Check
         run: |
