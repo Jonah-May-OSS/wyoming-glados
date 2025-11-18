@@ -1,7 +1,7 @@
+import asyncio
 import logging
 import time
-import asyncio
-from typing import Optional
+
 from gladostts.glados import TTSRunner  # Import your TTSRunner from glados.py
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,7 +23,12 @@ class GladosProcess:
         """Process the text and handle TTS output."""
         try:
             audio_segment = self.runner.run_tts(text, alpha)
-            yield audio_segment.raw_data, audio_segment.frame_rate, audio_segment.sample_width, audio_segment.channels
+            yield (
+                audio_segment.raw_data,
+                audio_segment.frame_rate,
+                audio_segment.sample_width,
+                audio_segment.channels,
+            )
         except Exception as e:
             _LOGGER.error(f"TTS processing failed for text: {text[:50]}... Error: {e}")
             raise
@@ -39,7 +44,7 @@ class GladosProcessManager:
         self.processes_lock = asyncio.Lock()  # Lock for thread safety
         _LOGGER.debug("Glados TTS process manager initialized.")
 
-    async def get_process(self, voice_name: Optional[str] = None) -> GladosProcess:
+    async def get_process(self, voice_name: str | None = None) -> GladosProcess:
         """Get the TTS process for the given voice or initialize a new one."""
         if voice_name is None:
             voice_name = "default"  # Assuming default voice if none provided

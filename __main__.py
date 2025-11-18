@@ -1,51 +1,34 @@
 #!/usr/bin/env python3
 
-
 """Utility for running the GLaDOS TTS server."""
 
+# -------------------------
+# 1. Standard library
+# -------------------------
 import argparse
 import asyncio
+import contextlib
 import logging
-import subprocess
 import os
+import subprocess
 import sys
 import time
-from typing import Optional
+import warnings
 from functools import partial
 from pathlib import Path
 
-import warnings
-
-# 1) hide that nested-tensor warning so it never pollutes your logs
-
-
-warnings.filterwarnings(
-    "ignore",
-    message="enable_nested_tensor is True, but self.use_nested_tensor is False",
-    module=r"torch\.nn\.modules\.transformer",
-)
-
-# 2) actually turn it off under the hood
-
-
-import torch.nn.modules.transformer as _tfm
-
-_tfm.enable_nested_tensor = False
-
+# -------------------------
+# 2. Third-party libraries
+# -------------------------
 import nltk
+import torch.nn.modules.transformer as _tfm
 from nltk import data as nltk_data
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
-# Configure logging
-
-
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
-
-# Ensure 'gladostts' module is importable
-
-
+# -------------------------
+# 3. Local imports
+# -------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -53,13 +36,29 @@ from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 
+# -------------------------
+# 4. Code after imports
+# -------------------------
+
+# hide nested tensor warning
+warnings.filterwarnings(
+    "ignore",
+    message="enable_nested_tensor is True, but self.use_nested_tensor is False",
+    module=r"torch\.nn\.modules\.transformer",
+)
+
+# actually disable it
+_tfm.enable_nested_tensor = False
+
+# logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
 
-    def formatTime(
-        self, record: logging.LogRecord, datefmt: Optional[str] = None
-    ) -> str:
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
         ct = record.created
         t = time.localtime(ct)
         s = time.strftime("%Y-%m-%d %H:%M:%S", t)
@@ -129,7 +128,7 @@ async def main() -> None:
     try:
         # Add timeout to prevent hanging
 
-        result = subprocess.run(
+        subprocess.run(
             [
                 sys.executable,
                 str(SCRIPT_DIR / "download.py"),
@@ -143,7 +142,7 @@ async def main() -> None:
         logger.info("Models downloaded (or already up-to-date).")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         error_msg = (
-            f"timeout after 300s"
+            "timeout after 300s"
             if isinstance(e, subprocess.TimeoutExpired)
             else f"exit {e.returncode}"
         )
@@ -240,8 +239,6 @@ def run():
     asyncio.run(main())
 
 
-if __name__ == "__main__":
-    try:
+if __name__ == "__main__":  # pragma: no cover
+    with contextlib.suppress(KeyboardInterrupt):
         run()
-    except KeyboardInterrupt:
-        pass

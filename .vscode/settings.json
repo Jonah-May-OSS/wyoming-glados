@@ -1,0 +1,12 @@
+{
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+
+    ,
+    // Use the project's virtual environment for the Python extension and testing
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+    "python.testing.pytestPath": "${workspaceFolder}\\.venv\\Scripts\\pytest.exe"
+}

@@ -1,6 +1,5 @@
 import argparse
 import logging
-from typing import Optional
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
@@ -9,10 +8,10 @@ from wyoming.info import Describe, Info
 from wyoming.server import AsyncEventHandler
 from wyoming.tts import (
     Synthesize,
+    SynthesizeChunk,
     SynthesizeStart,
     SynthesizeStop,
     SynthesizeStopped,
-    SynthesizeChunk,
 )
 
 from .process import GladosProcessManager
@@ -38,8 +37,8 @@ class GladosEventHandler(AsyncEventHandler):
         self.sbd = (
             SentenceBoundaryDetector()
         )  # Initialize the sentence boundary detector
-        self.is_streaming: Optional[bool] = None
-        self._synthesize: Optional[Synthesize] = None
+        self.is_streaming: bool | None = None
+        self._synthesize: Synthesize | None = None
 
         self.audio_started = False
 
@@ -115,7 +114,6 @@ class GladosEventHandler(AsyncEventHandler):
             async for pcm, rate, width, channels in glados_proc.run_tts(
                 synthesize.text
             ):
-
                 # Send AudioStart event if it's not already sent
 
                 if not self.audio_started:
