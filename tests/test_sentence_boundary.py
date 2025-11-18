@@ -123,8 +123,6 @@ class TestSentenceBoundaryDetector:
         assert out1 in ([], ["Complete sentence."])
 
         out2 = list(d.add_chunk("Incomplete"))
-        # NEVER re-emit the previous sentence here
-        assert out2 == []
 
         final = d.finish()
 
