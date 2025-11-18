@@ -1,11 +1,11 @@
 import asyncio
 import importlib.util
-import pytest
-from pathlib import Path
 import logging
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 # Path to project root: tests/.. = project root
 ROOT = Path(__file__).resolve().parent.parent
