@@ -7,13 +7,22 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import nltk
 import os
 import subprocess
 import sys
 import time
+import torch.nn.modules.transformer as _tfm
 import warnings
 from functools import partial
+from gladostts.glados import TTSRunner
+from nltk import data as nltk_data
 from pathlib import Path
+from server.handler import GladosEventHandler
+from server.process import GladosProcessManager
+from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
+from wyoming.server import AsyncServer
+
 
 # 1) hide that nested-tensor warning so it never pollutes your logs
 
@@ -25,14 +34,7 @@ warnings.filterwarnings(
 
 # 2) actually turn it off under the hood
 
-import torch.nn.modules.transformer as _tfm
-
 _tfm.enable_nested_tensor = False
-
-import nltk
-from nltk import data as nltk_data
-from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
-from wyoming.server import AsyncServer
 
 # Configure logging
 
@@ -44,9 +46,6 @@ logger.addHandler(logging.NullHandler())
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from gladostts.glados import TTSRunner
-from server.handler import GladosEventHandler
-from server.process import GladosProcessManager
 
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
