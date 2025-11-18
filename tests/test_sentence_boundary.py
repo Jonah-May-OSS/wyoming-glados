@@ -9,6 +9,7 @@ Key facts:
 
 import sys
 from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,6 +24,7 @@ from server.sentence_boundary import (
 # ------------------------------------------------------------
 # remove_asterisks tests
 # ------------------------------------------------------------
+
 
 class TestRemoveAsterisks:
     def test_remove_word_asterisks(self):
@@ -53,8 +55,8 @@ class TestRemoveAsterisks:
 # SentenceBoundaryDetector tests — EXACT CI BEHAVIOR
 # ------------------------------------------------------------
 
-class TestSentenceBoundaryDetector:
 
+class TestSentenceBoundaryDetector:
     def test_single_sentence(self):
         d = SentenceBoundaryDetector()
         out = list(d.add_chunk("Hello world. "))
@@ -97,8 +99,8 @@ class TestSentenceBoundaryDetector:
 
     def test_finish_with_remaining_text(self):
         d = SentenceBoundaryDetector()
-        d.add_chunk("Complete sentence. ")   # emitted immediately
-        d.add_chunk("Incomplete")            # incomplete → stays
+        d.add_chunk("Complete sentence. ")  # emitted immediately
+        d.add_chunk("Incomplete")  # incomplete → stays
         # CI shows FINISH returns "" (incomplete fragment was not preserved)
         assert d.finish() == ""
 
