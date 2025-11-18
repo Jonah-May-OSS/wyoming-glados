@@ -25,7 +25,8 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-          persist-credentials: true
+          token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+          persist-credentials: false
           submodules: recursive
 
       - name: Setup Python
