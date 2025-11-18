@@ -11,7 +11,6 @@ SENTENCE_BOUNDARY_RE = re.compile(
     rf"(.*?(?:{SENTENCE_END}+))(?=\s+[\p{{Lu}}\p{{Lt}}\p{{Lo}}]|(?:\s+\d+\.\s+))",
     re.DOTALL,
 )
-
 WORD_ASTERISKS = re.compile(r"\*+([^\*]+)\*+")
 LINE_ASTERISKS = re.compile(r"(?<=^|\n)\s*\*+")
 
@@ -25,46 +24,35 @@ class SentenceBoundaryDetector:
         """Add a new chunk of text and yield sentences."""
         self.remaining_text += chunk
 
-        while True:
+        while self.remaining_text:
             match = SENTENCE_BOUNDARY_RE.search(self.remaining_text)
             if not match:
                 break
+            match_text = match.group(0)
 
-            sentence_portion = self.remaining_text[: match.end()]
-            self.current_sentence += sentence_portion
+            # Add to current sentence
+
+            self.current_sentence += match_text
+
+            # Check if we have a complete sentence (not an abbreviation)
 
             if not ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
+            # Update the remaining text
 
-            self.remaining_text = self.remaining_text[match.end() :].lstrip()
+            self.remaining_text = self.remaining_text[match.end() :]
 
     def finish(self) -> str:
-        """
-        Finalize and return *all remaining text*, clearing state.
-
-        NOTE:
-        Updated to match the updated test expectations:
-        - Always return the leftover text.
-        - Do NOT require regex boundaries.
-        - This matches real streaming NLP behavior where
-          partial or final sentences appear at flush time.
-        """
-        combined = self.current_sentence + self.remaining_text
-
-        # Clear state
-        self.current_sentence = ""
+        """Finalize and return the last sentence, clearing state."""
+        text = (self.current_sentence + self.remaining_text).strip()
         self.remaining_text = ""
-
-        combined = combined.strip()
-        if combined:
-            return remove_asterisks(combined)
-
-        return ""
+        self.current_sentence = ""
+        return remove_asterisks(text)
 
 
 def remove_asterisks(text: str) -> str:
-    """Remove *asterisks* surrounding **words**."""
+    """Remove *asterisks* surrounding **words**"""
     text = WORD_ASTERISKS.sub(r"\1", text)
     text = LINE_ASTERISKS.sub("", text)
     return text
