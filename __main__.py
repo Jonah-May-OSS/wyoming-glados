@@ -7,17 +7,18 @@ import argparse
 import asyncio
 import contextlib
 import logging
-import nltk
 import os
 import subprocess
 import sys
 import time
-import torch.nn.modules.transformer as _tfm
 import warnings
 from functools import partial
+from pathlib import Path
+
+import nltk
+import torch.nn.modules.transformer as _tfm
 from gladostts.glados import TTSRunner
 from nltk import data as nltk_data
-from pathlib import Path
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
