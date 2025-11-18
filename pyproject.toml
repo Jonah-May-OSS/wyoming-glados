@@ -45,7 +45,20 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
     "--verbose",
-    "--cov=server",
+    "--cov=.",
     "--cov-report=term-missing",
     "--cov-report=html",
+]
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "gladostts/*",
+    "docker/*",
+    "htmlcov/*",
+]
+
+[tool.coverage.report]
+omit = [
+    "tests/*",
 ]

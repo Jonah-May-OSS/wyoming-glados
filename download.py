@@ -127,10 +127,11 @@ def ensure_model_exists(download_dir: Path, base_url: str):
                 _quote_url(model_url),
             )
             if model_file_path.exists():
-                model_file_path.unlink()  # Remove incomplete file
+                model_file_path.unlink()  # pragma: no cover
+                # Remove incomplete file
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description="GLaDOS TTS Model Downloader")
     parser.add_argument(
         "--model-dir",
