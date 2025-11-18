@@ -8,14 +8,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wyoming.info import Info
+from wyoming.info import Describe, Info
 from wyoming.tts import (
     Synthesize,
     SynthesizeChunk,
     SynthesizeStart,
     SynthesizeStop,
 )
-from wyoming.info import Describe
+
 from server.handler import GladosEventHandler
 from server.process import GladosProcess
 from server.sentence_boundary import SentenceBoundaryDetector
@@ -36,6 +36,7 @@ def make_async_gen(*items):
         for item in items:
             yield item
         await asyncio.sleep(0)
+
     return gen()
 
 
