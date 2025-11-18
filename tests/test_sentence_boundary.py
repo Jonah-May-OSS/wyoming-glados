@@ -10,6 +10,7 @@ REAL behavior summary:
 
 import sys
 from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -25,8 +26,8 @@ from server.sentence_boundary import (
 # remove_asterisks tests
 # ------------------------------------------------------------
 
-class TestRemoveAsterisks:
 
+class TestRemoveAsterisks:
     def test_remove_word_asterisks(self):
         assert remove_asterisks("This is *bold* text") == "This is bold text"
         assert remove_asterisks("**Important** message") == "Important message"
@@ -55,8 +56,8 @@ class TestRemoveAsterisks:
 # SentenceBoundaryDetector tests
 # ------------------------------------------------------------
 
-class TestSentenceBoundaryDetector:
 
+class TestSentenceBoundaryDetector:
     def test_single_sentence(self):
         d = SentenceBoundaryDetector()
         assert list(d.add_chunk("Hello world. ")) == []
