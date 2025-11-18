@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
-
 """Utility for running the GLaDOS TTS server."""
 
+# -------------------------
+# 1. Standard library
+# -------------------------
 import argparse
 import asyncio
 import contextlib
@@ -15,38 +17,42 @@ import warnings
 from functools import partial
 from pathlib import Path
 
+# -------------------------
+# 2. Third-party libraries
+# -------------------------
 import nltk
-import torch.nn.modules.transformer as _tfm
-from gladostts.glados import TTSRunner
 from nltk import data as nltk_data
+import torch.nn.modules.transformer as _tfm
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
+# -------------------------
+# 3. Local imports
+# -------------------------
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 
-# 1) hide that nested-tensor warning so it never pollutes your logs
+# -------------------------
+# 4. Code after imports
+# -------------------------
 
+# hide nested tensor warning
 warnings.filterwarnings(
     "ignore",
     message="enable_nested_tensor is True, but self.use_nested_tensor is False",
     module=r"torch\.nn\.modules\.transformer",
 )
 
-# 2) actually turn it off under the hood
-
+# actually disable it
 _tfm.enable_nested_tensor = False
 
-
-# Configure logging
-
+# logger
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
-
-# Ensure 'gladostts' module is importable
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
 
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
