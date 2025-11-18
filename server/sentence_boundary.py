@@ -11,6 +11,7 @@ SENTENCE_BOUNDARY_RE = re.compile(
     rf"(.*?(?:{SENTENCE_END}+))(?=\s+[\p{{Lu}}\p{{Lt}}\p{{Lo}}]|(?:\s+\d+\.\s+))",
     re.DOTALL,
 )
+
 WORD_ASTERISKS = re.compile(r"\*+([^\*]+)\*+")
 LINE_ASTERISKS = re.compile(r"(?<=^|\n)\s*\*+")
 
@@ -28,27 +29,35 @@ class SentenceBoundaryDetector:
             match = SENTENCE_BOUNDARY_RE.search(self.remaining_text)
             if not match:
                 break
-            match_text = match.group(0)
 
-            # Add to current sentence
+            # Extract full matched sentence portion (text up to match end)
+            sentence_portion = self.remaining_text[: match.end()]
 
-            self.current_sentence += match_text
+            # Append to current sentence buffer
+            self.current_sentence += sentence_portion
 
-            # Check if we have a complete sentence (not an abbreviation)
-
+            # Emit full sentence unless it ends in an abbreviation
             if not ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
-            # Update the remaining text
 
-            self.remaining_text = self.remaining_text[match.end() :]
+            # Remove used portion from buffer
+            self.remaining_text = self.remaining_text[match.end():].lstrip()
 
     def finish(self) -> str:
         """Finalize and return the last sentence, clearing state."""
-        text = (self.current_sentence + self.remaining_text).strip()
+        combined = (self.current_sentence + self.remaining_text)
+
+        # reset state
         self.remaining_text = ""
         self.current_sentence = ""
-        return remove_asterisks(text)
+
+        # If leftover text contains meaningful characters, return it
+        cleaned = combined.strip()
+        if cleaned:
+            return remove_asterisks(cleaned)
+
+        return ""
 
 
 def remove_asterisks(text: str) -> str:
