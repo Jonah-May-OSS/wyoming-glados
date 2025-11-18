@@ -1,6 +1,7 @@
 """Guess the sentence boundaries in text."""
 
 from collections.abc import Iterable
+
 import regex as re
 
 SENTENCE_END = r"[.!?…]|[。！？]|[؟]|[।॥]"
@@ -36,7 +37,7 @@ class SentenceBoundaryDetector:
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
 
-            self.remaining_text = self.remaining_text[match.end():].lstrip()
+            self.remaining_text = self.remaining_text[match.end() :].lstrip()
 
     def finish(self) -> str:
         """
@@ -49,7 +50,7 @@ class SentenceBoundaryDetector:
         - This matches real streaming NLP behavior where
           partial or final sentences appear at flush time.
         """
-        combined = (self.current_sentence + self.remaining_text)
+        combined = self.current_sentence + self.remaining_text
 
         # Clear state
         self.current_sentence = ""
