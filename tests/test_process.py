@@ -105,3 +105,29 @@ class TestGladosProcessManager:
 
         # Manager should have only one entry
         assert list(mgr.processes.keys()) == ["samevoice"]
+
+    @pytest.mark.asyncio
+    async def test_run_tts_exception_path():
+        """Ensure the exception block in run_tts is covered."""
+        mock_runner = MagicMock()
+    
+        # Simulate runner throwing an exception
+        mock_runner.run_tts.side_effect = RuntimeError("boom")
+
+        p = GladosProcess("voice", mock_runner)
+
+        with pytest.raises(RuntimeError):
+            async for _ in p.run_tts("text"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_get_process_updates_timestamp_on_creation():
+        """Ensure last_used is set when a NEW process is created."""
+        mock_runner = MagicMock()
+        mgr = GladosProcessManager(mock_runner)
+
+        before = time.monotonic_ns()
+        proc = await mgr.get_process("freshvoice")
+
+        assert proc.voice_name == "freshvoice"
+        assert proc.last_used >= before
