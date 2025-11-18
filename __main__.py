@@ -23,7 +23,6 @@ from server.process import GladosProcessManager
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
-
 # 1) hide that nested-tensor warning so it never pollutes your logs
 
 warnings.filterwarnings(
@@ -36,6 +35,7 @@ warnings.filterwarnings(
 
 _tfm.enable_nested_tensor = False
 
+
 # Configure logging
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,6 @@ logger.addHandler(logging.NullHandler())
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-
 
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
