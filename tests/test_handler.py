@@ -8,14 +8,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wyoming.info import Info, Describe
+from wyoming.event import Event
+from wyoming.info import Describe, Info
 from wyoming.tts import (
     Synthesize,
     SynthesizeChunk,
     SynthesizeStart,
     SynthesizeStop,
 )
-from wyoming.event import Event
 
 from server.handler import GladosEventHandler
 from server.process import GladosProcess, GladosProcessManager
@@ -25,8 +25,10 @@ from server.sentence_boundary import SentenceBoundaryDetector
 # Proper async writer
 # ---------------------------------------------------------------------------
 
+
 class DummyAsyncWriter:
     """A real async writer as required by AsyncEventHandler."""
+
     def __init__(self):
         self.events = []
 
@@ -41,12 +43,14 @@ def make_async_gen(*items):
             yield item
         return
         yield  # unreachable, prevents StopIteration crash
+
     return gen
 
 
 # ---------------------------------------------------------------------------
 # Factory to build a correct GladosEventHandler
 # ---------------------------------------------------------------------------
+
 
 def build_handler(streaming=False):
     # REAL Info object — required for Describe.is_type(event)
@@ -79,6 +83,7 @@ def build_handler(streaming=False):
 # TESTS
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_handle_describe():
     handler, mgr, writer = build_handler()
@@ -92,9 +97,7 @@ async def test_handle_describe():
 async def test_synthesize_basic_path():
     handler, mgr, writer = build_handler(streaming=False)
 
-    mgr.get_process.return_value.run_tts = make_async_gen(
-        (b"aaa", 22050, 2, 1)
-    )()
+    mgr.get_process.return_value.run_tts = make_async_gen((b"aaa", 22050, 2, 1))()
 
     await handler.handle_event(Synthesize(text="Hello world.").event())
 
@@ -133,9 +136,7 @@ async def test_stream_start_resets_state():
 async def test_stream_chunk_sentence_emission():
     handler, mgr, writer = build_handler(streaming=True)
 
-    mgr.get_process.return_value.run_tts = make_async_gen(
-        (b"abc", 22050, 2, 1)
-    )()
+    mgr.get_process.return_value.run_tts = make_async_gen((b"abc", 22050, 2, 1))()
 
     await handler.handle_event(SynthesizeStart(voice="v").event())
     await handler.handle_event(SynthesizeChunk(text="Hello. ").event())
@@ -149,9 +150,7 @@ async def test_stream_chunk_sentence_emission():
 async def test_stream_stop_flushes_remaining_text():
     handler, mgr, writer = build_handler(streaming=True)
 
-    mgr.get_process.return_value.run_tts = make_async_gen(
-        (b"xyz", 22050, 2, 1)
-    )()
+    mgr.get_process.return_value.run_tts = make_async_gen((b"xyz", 22050, 2, 1))()
 
     await handler.handle_event(SynthesizeStart(voice="v").event())
     await handler.handle_event(SynthesizeChunk(text="Hi").event())
@@ -164,9 +163,7 @@ async def test_stream_stop_flushes_remaining_text():
 async def test_asterisk_removal_in_synthesize():
     handler, mgr, writer = build_handler(streaming=False)
 
-    mgr.get_process.return_value.run_tts = make_async_gen(
-        (b"aaa", 22050, 2, 1)
-    )()
+    mgr.get_process.return_value.run_tts = make_async_gen((b"aaa", 22050, 2, 1))()
 
     await handler.handle_event(Synthesize(text="This is *important*.").event())
 
