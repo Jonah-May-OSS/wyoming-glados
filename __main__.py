@@ -17,7 +17,6 @@ from pathlib import Path
 
 # 1) hide that nested-tensor warning so it never pollutes your logs
 
-
 warnings.filterwarnings(
     "ignore",
     message="enable_nested_tensor is True, but self.use_nested_tensor is False",
@@ -25,7 +24,6 @@ warnings.filterwarnings(
 )
 
 # 2) actually turn it off under the hood
-
 
 import torch.nn.modules.transformer as _tfm
 
@@ -38,21 +36,17 @@ from wyoming.server import AsyncServer
 
 # Configure logging
 
-
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 # Ensure 'gladostts' module is importable
 
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from gladostts.glados import TTSRunner
-
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
-
 
 class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
