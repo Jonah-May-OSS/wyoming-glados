@@ -25,38 +25,43 @@ class SentenceBoundaryDetector:
         """Add a new chunk of text and yield sentences."""
         self.remaining_text += chunk
 
-        while self.remaining_text:
+        # Main regex-driven segmentation loop
+        while True:
             match = SENTENCE_BOUNDARY_RE.search(self.remaining_text)
             if not match:
                 break
 
-            # Extract full matched sentence portion (text up to match end)
             sentence_portion = self.remaining_text[: match.end()]
-
-            # Append to current sentence buffer
             self.current_sentence += sentence_portion
 
-            # Emit full sentence unless it ends in an abbreviation
             if not ABBREVIATION_RE.search(self.current_sentence[-5:]):
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
 
-            # Remove used portion from buffer
-            self.remaining_text = self.remaining_text[match.end() :].lstrip()
+            self.remaining_text = self.remaining_text[match.end():].lstrip()
+
+        # 🔥 Fallback: if text ends with a sentence-ending punctuation + optional space
+        fallback_match = re.match(
+            rf"^(.*{SENTENCE_END}+)\s*$", self.remaining_text
+        )
+        if fallback_match:
+            self.current_sentence += fallback_match.group(1)
+            sentence = self.current_sentence.strip()
+
+            if sentence and not ABBREVIATION_RE.search(sentence[-5:]):
+                yield remove_asterisks(sentence)
+                self.current_sentence = ""
+                self.remaining_text = ""
 
     def finish(self) -> str:
         """Finalize and return the last sentence, clearing state."""
-        combined = self.current_sentence + self.remaining_text
-
-        # reset state
-        self.remaining_text = ""
+        combined = (self.current_sentence + self.remaining_text)
         self.current_sentence = ""
+        self.remaining_text = ""
 
-        # If leftover text contains meaningful characters, return it
-        cleaned = combined.strip()
-        if cleaned:
-            return remove_asterisks(cleaned)
-
+        combined = combined.strip()
+        if combined:
+            return remove_asterisks(combined)
         return ""
 
 
