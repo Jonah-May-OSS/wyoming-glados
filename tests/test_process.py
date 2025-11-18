@@ -110,7 +110,7 @@ class TestGladosProcessManager:
     async def test_run_tts_exception_path():
         """Ensure the exception block in run_tts is covered."""
         mock_runner = MagicMock()
-    
+
         # Simulate runner throwing an exception
         mock_runner.run_tts.side_effect = RuntimeError("boom")
 
