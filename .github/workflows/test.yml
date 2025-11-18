@@ -22,7 +22,7 @@ jobs:
     steps:
       # 1. Checkout the repository code
       - name: Checkout Code
-        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+        uses: actions/checkout@71cf2267d89c5cb81562390fa70a37fa40b1305e
         with:
           submodules: recursive
 
@@ -41,7 +41,7 @@ jobs:
 
       # 4. Setup Python environment
       - name: Setup Python
-        uses: actions/setup-python@2e3e4b15a884dc73a63f962bff250a855150a234
+        uses: actions/setup-python@97aeb3efb8a852c559869050c7fb175b4efcc8cf
         with:
           python-version: '3.13'  # Use a stable version
 
@@ -62,7 +62,7 @@ jobs:
           sudo apt-get install -y nvidia-open
 
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@1a3c14e26833ccf292b268f9a790fb47dea7b2da
+        uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2
         with:
           use-github-cache: false
       
@@ -126,7 +126,7 @@ jobs:
       # 9. Upload server logs if the test fails
       - name: Upload Server Logs
         if: always()
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
           name: server-logs
           path: server.log
