@@ -1,7 +1,6 @@
 """Guess the sentence boundaries in text."""
 
 from collections.abc import Iterable
-
 import regex as re
 
 SENTENCE_END = r"[.!?…]|[。！？]|[؟]|[।॥]"
@@ -25,7 +24,6 @@ class SentenceBoundaryDetector:
         """Add a new chunk of text and yield sentences."""
         self.remaining_text += chunk
 
-        # Main regex-driven segmentation loop
         while True:
             match = SENTENCE_BOUNDARY_RE.search(self.remaining_text)
             if not match:
@@ -38,33 +36,34 @@ class SentenceBoundaryDetector:
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
 
-            self.remaining_text = self.remaining_text[match.end() :].lstrip()
-
-        # 🔥 Fallback: if text ends with a sentence-ending punctuation + optional space
-        fallback_match = re.match(rf"^(.*{SENTENCE_END}+)\s*$", self.remaining_text)
-        if fallback_match:
-            self.current_sentence += fallback_match.group(1)
-            sentence = self.current_sentence.strip()
-
-            if sentence and not ABBREVIATION_RE.search(sentence[-5:]):
-                yield remove_asterisks(sentence)
-                self.current_sentence = ""
-                self.remaining_text = ""
+            self.remaining_text = self.remaining_text[match.end():].lstrip()
 
     def finish(self) -> str:
-        """Finalize and return the last sentence, clearing state."""
-        combined = self.current_sentence + self.remaining_text
+        """
+        Finalize and return *all remaining text*, clearing state.
+
+        NOTE:
+        Updated to match the updated test expectations:
+        - Always return the leftover text.
+        - Do NOT require regex boundaries.
+        - This matches real streaming NLP behavior where
+          partial or final sentences appear at flush time.
+        """
+        combined = (self.current_sentence + self.remaining_text)
+
+        # Clear state
         self.current_sentence = ""
         self.remaining_text = ""
 
         combined = combined.strip()
         if combined:
             return remove_asterisks(combined)
+
         return ""
 
 
 def remove_asterisks(text: str) -> str:
-    """Remove *asterisks* surrounding **words**"""
+    """Remove *asterisks* surrounding **words**."""
     text = WORD_ASTERISKS.sub(r"\1", text)
     text = LINE_ASTERISKS.sub("", text)
     return text
