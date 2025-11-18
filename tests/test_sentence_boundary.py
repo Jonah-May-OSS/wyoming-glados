@@ -118,12 +118,9 @@ class TestSentenceBoundaryDetector:
         d = SentenceBoundaryDetector()
 
         out1 = list(d.add_chunk("Complete sentence. "))
-        # Some versions emit the complete sentence immediately
-        if out1:
-            assert out1 == ["Complete sentence."]
-        else:
-            # Others defer emission
-            pass
+        # CI emits the complete sentence immediately
+        # Other environments may emit nothing mid-stream.
+        assert out1 in ([], ["Complete sentence."])
 
         out2 = list(d.add_chunk("Incomplete"))
         # Incomplete fragments never emit mid-stream
@@ -131,9 +128,8 @@ class TestSentenceBoundaryDetector:
 
         final = d.finish()
 
-        # Accept both behaviors:
-        # - CI: "Incomplete"
-        # - other: "Complete sentence. Incomplete"
+        # finish() may return just the leftover ("Incomplete")
+        # or the full combined text if nothing was emitted earlier.
         assert "Incomplete" in final
 
     def test_finish_clears_state(self):
