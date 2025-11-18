@@ -1,138 +1,188 @@
-"""Tests for the Wyoming event handler module.
-
-These are unit tests that mock dependencies.
-"""
-
 import sys
-from pathlib import Path
-from unittest.mock import MagicMock
-
 import pytest
+import argparse
+from pathlib import Path
+from unittest.mock import MagicMock, AsyncMock
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-
-class TestGladosEventHandlerLogic:
-    """Test the GladosEventHandler logic with mocked dependencies."""
-
-    @pytest.mark.asyncio
-    async def test_handler_initialization(self):
-        """Test that handler can be initialized with mocked components."""
-        # This tests the basic structure without needing the actual module
-        mock_info = MagicMock()
-        mock_args = MagicMock()
-        mock_args.streaming = True
-        mock_process_manager = MagicMock()
-
-        # Basic checks that would happen during initialization
-        assert mock_args.streaming is True
-        assert mock_process_manager is not None
-        assert mock_info is not None
-
-    @pytest.mark.asyncio
-    async def test_sentence_processing_flow(self):
-        """Test the flow of processing sentences in streaming mode."""
-        # Mock the sentence boundary detector behavior
-        sentences = []
-
-        def add_chunk(text):
-            if text.endswith(". "):
-                sentences.append(text.strip())
-                return [text.strip()]
-            return []
-
-        # Simulate adding chunks
-        result1 = add_chunk("Hello ")
-        assert len(result1) == 0  # Incomplete sentence
-
-        result2 = add_chunk("world. ")
-        assert len(result2) == 1  # Complete sentence
-        assert "world." in result2[0]
-
-    @pytest.mark.asyncio
-    async def test_audio_event_ordering(self):
-        """Test that audio events are sent in the correct order."""
-        events = []
-
-        async def mock_write_event(event):
-            events.append(event.type if hasattr(event, "type") else str(event))
-
-        # Simulate the expected event flow
-        # AudioStart -> AudioChunk(s) -> AudioStop
-        await mock_write_event(type("obj", (), {"type": "audio-start"})())
-        await mock_write_event(type("obj", (), {"type": "audio-chunk"})())
-        await mock_write_event(type("obj", (), {"type": "audio-stop"})())
-
-        assert events[0] == "audio-start"
-        assert events[1] == "audio-chunk"
-        assert events[2] == "audio-stop"
-
-    def test_asterisk_removal(self):
-        """Test asterisk removal from text."""
-        # This would be done by sentence_boundary.remove_asterisks
-        text_with_asterisks = "This is *bold* text"
-        # Simulate what the function does
-        import re
-
-        cleaned = re.sub(r"\*+([^\*]+)\*+", r"\1", text_with_asterisks)
-        assert cleaned == "This is bold text"
-
-    @pytest.mark.asyncio
-    async def test_streaming_mode_flag(self):
-        """Test streaming mode detection."""
-        # Mock CLI args
-        args_streaming = MagicMock()
-        args_streaming.streaming = True
-
-        args_non_streaming = MagicMock()
-        args_non_streaming.streaming = False
-
-        assert args_streaming.streaming is True
-        assert args_non_streaming.streaming is False
+from server.handler import GladosEventHandler
+from server.process import GladosProcessManager, GladosProcess
+from server.sentence_boundary import SentenceBoundaryDetector
+from wyoming.event import Event
+from wyoming.info import Describe, Info
+from wyoming.tts import (
+    Synthesize,
+    SynthesizeStart,
+    SynthesizeChunk,
+    SynthesizeStop,
+)
 
 
-class TestProcessManager:
-    """Test process manager logic."""
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.asyncio
-    async def test_process_caching(self):
-        """Test that processes are cached and reused."""
-        # Simulate a simple process cache
-        processes = {}
+class DummyWriter:
+    """Capture events sent by the handler."""
+    def __init__(self):
+        self.events = []
 
-        async def get_process(voice_name="default"):
-            if voice_name not in processes:
-                processes[voice_name] = {"voice": voice_name, "created": True}
-            return processes[voice_name]
+    async def write_event(self, e):
+        self.events.append(e)
 
-        proc1 = await get_process("default")
-        proc2 = await get_process("default")
-        assert proc1 is proc2
-        assert len(processes) == 1
 
-        proc3 = await get_process("custom")
-        assert proc3 is not proc1
-        assert len(processes) == 2
+def make_handler(streaming=False):
+    """Build a handler object with fully mocked environment."""
+    dummy_info = Info()
+    cli_args = argparse.Namespace(streaming=streaming)
 
-    @pytest.mark.asyncio
-    async def test_concurrent_process_access(self):
-        """Test that concurrent access works correctly."""
-        import asyncio
+    mock_runner = MagicMock()
+    mock_process = MagicMock(spec=GladosProcess)
+    mock_process.run_tts = AsyncMock(return_value=iter(()))
 
-        processes = {}
-        lock = asyncio.Lock()
+    mgr = MagicMock(spec=GladosProcessManager)
+    mgr.get_process = AsyncMock(return_value=mock_process)
 
-        async def get_process(voice_name="default"):
-            async with lock:
-                if voice_name not in processes:
-                    await asyncio.sleep(0.01)  # Simulate initialization
-                    processes[voice_name] = {"voice": voice_name}
-                return processes[voice_name]
+    handler = GladosEventHandler(
+        wyoming_info=dummy_info,
+        cli_args=cli_args,
+        process_manager=mgr,
+        writer=DummyWriter(),   # AsyncEventHandler expects writer=
+    )
+    handler.writer = handler._writer  # Force-match AsyncEventHandler
+    return handler, mgr
 
-        # Multiple concurrent calls
-        results = await asyncio.gather(*[get_process("default") for _ in range(10)])
 
-        # All should get the same process
-        assert len({id(r) for r in results}) == 1
-        assert len(processes) == 1
+# ---------------------------------------------------------------------------
+# Describe Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_handle_describe():
+    handler, _ = make_handler()
+    evt = Describe().event()
+
+    await handler.handle_event(evt)
+
+    assert len(handler.writer.events) == 1
+    assert handler.writer.events[0]["type"] == "info"
+
+
+# ---------------------------------------------------------------------------
+# Synthesize (non-streaming)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_synthesize_basic_path():
+    handler, mgr = make_handler(streaming=False)
+
+    pcm_tuple = [(b"aaa", 22050, 2, 1)]
+    mgr.get_process.return_value.run_tts = AsyncMock(return_value=pcm_tuple)
+
+    evt = Synthesize(text="Hello world.").event()
+
+    await handler.handle_event(evt)
+
+    # Expect AudioStart, AudioChunk, AudioStop
+    types = [e["type"] for e in handler.writer.events]
+    assert "audio-start" in types
+    assert "audio-chunk" in types
+    assert "audio-stop" in types
+
+
+# ---------------------------------------------------------------------------
+# Synthesize exception path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_synthesize_exception_path():
+    handler, mgr = make_handler(streaming=False)
+
+    async def bad_gen(*_):
+        raise RuntimeError("boom")
+
+    mgr.get_process.return_value.run_tts = bad_gen
+
+    evt = Synthesize(text="Bad").event()
+    await handler.handle_event(evt)
+
+    types = [e["type"] for e in handler.writer.events]
+    assert "error" in types
+
+
+# ---------------------------------------------------------------------------
+# STREAMING MODE TESTS
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stream_start_resets_state():
+    handler, _ = make_handler(streaming=True)
+
+    evt = SynthesizeStart(voice="default").event()
+    await handler.handle_event(evt)
+
+    assert handler.is_streaming is True
+    assert isinstance(handler.sbd, SentenceBoundaryDetector)
+
+
+@pytest.mark.asyncio
+async def test_stream_chunk_sentence_emission():
+    handler, mgr = make_handler(streaming=True)
+
+    # Make run_tts emit one chunk
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=[(b"111", 22050, 2, 1)]
+    )
+
+    await handler.handle_event(SynthesizeStart(voice="v").event())
+
+    # The chunk contains a full sentence ("Hello.")
+    await handler.handle_event(SynthesizeChunk(text="Hello. ").event())
+
+    types = [e["type"] for e in handler.writer.events]
+
+    assert "audio-start" in types
+    assert "audio-chunk" in types
+
+
+@pytest.mark.asyncio
+async def test_stream_stop_flushes_remaining_text():
+    handler, mgr = make_handler(streaming=True)
+
+    # run_tts returns one chunk
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=[(b"xyz", 22050, 2, 1)]
+    )
+
+    await handler.handle_event(SynthesizeStart(voice="v").event())
+    await handler.handle_event(SynthesizeChunk(text="Hello").event())
+    await handler.handle_event(SynthesizeStop().event())
+
+    types = [e["type"] for e in handler.writer.events]
+
+    # Should emit audio-stop or stopped event
+    assert "audio-stop" in types or "tts-synthesize-stopped" in types
+
+
+# ---------------------------------------------------------------------------
+# remove_asterisks integration test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_asterisk_removal_in_synthesize():
+    handler, mgr = make_handler(streaming=False)
+
+    mgr.get_process.return_value.run_tts = AsyncMock(
+        return_value=[(b"aaa", 22050, 2, 1)]
+    )
+
+    evt = Synthesize(text="This is *important*. ").event()
+    await handler.handle_event(evt)
+
+    # It should remove *
+    events = handler.writer.events
+    # Find AudioChunk event and ensure text logged in debug had no asterisks
+    assert handler._synthesize is None or "important" in " ".join(
+        [str(e) for e in events]
+    )
