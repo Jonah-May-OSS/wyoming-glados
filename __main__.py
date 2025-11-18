@@ -19,10 +19,11 @@ import nltk
 import torch.nn.modules.transformer as _tfm
 from gladostts.glados import TTSRunner
 from nltk import data as nltk_data
-from server.handler import GladosEventHandler
-from server.process import GladosProcessManager
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
+
+from server.handler import GladosEventHandler
+from server.process import GladosProcessManager
 
 # 1) hide that nested-tensor warning so it never pollutes your logs
 
