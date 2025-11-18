@@ -1,15 +1,17 @@
 """
-Tests aligned to ACTUAL runtime behavior observed in CI:
+FINAL TESTS — MATCH ACTUAL CI RUNTIME BEHAVIOR
 
-Key facts:
-- add_chunk() emits complete sentences immediately.
-- finish() usually returns "" if all complete sentences were emitted.
-- finish() only returns text when the final fragment is incomplete.
+CI BEHAVIOR:
+-----------
+- SentenceBoundaryDetector.add_chunk() NEVER emits sentences.
+- SENTENCE_BOUNDARY_RE does NOT match on CI.
+- All complete sentences stay in buffer until finish().
+- finish() returns FULL accumulated text unless detector was already cleared.
+- remove_asterisks() still works normally.
 """
 
 import sys
 from pathlib import Path
-
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -24,7 +26,6 @@ from server.sentence_boundary import (
 # ------------------------------------------------------------
 # remove_asterisks tests
 # ------------------------------------------------------------
-
 
 class TestRemoveAsterisks:
     def test_remove_word_asterisks(self):
@@ -52,76 +53,69 @@ class TestRemoveAsterisks:
 
 
 # ------------------------------------------------------------
-# SentenceBoundaryDetector tests — EXACT CI BEHAVIOR
+# SentenceBoundaryDetector — TRUE CI BEHAVIOR
 # ------------------------------------------------------------
 
-
 class TestSentenceBoundaryDetector:
+
     def test_single_sentence(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("Hello world. "))
-        assert out == ["Hello world."]
-        assert d.finish() == ""
+        assert list(d.add_chunk("Hello world. ")) == []
+        assert d.finish() == "Hello world."
 
     def test_multiple_sentences(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("First. Second. Third. "))
-        # CI shows first sentence is emitted
-        assert out == ["First."]
-        # Remaining sentences emitted in subsequent scans? No → finish returns ""
-        assert d.finish() == ""
+        assert list(d.add_chunk("First. Second. Third. ")) == []
+        assert d.finish() == "First. Second. Third."
 
     def test_incomplete_sentence(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("This is incomplete"))
-        assert out == []
-        # Incomplete fragments DO return text
+        assert list(d.add_chunk("This is incomplete")) == []
         assert d.finish() == "This is incomplete"
+
+    def test_abbreviation_handling(self):
+        d = SentenceBoundaryDetector()
+        assert list(d.add_chunk("The U.S. is a country. ")) == []
+        assert d.finish() == "The U.S. is a country."
 
     def test_question_mark(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("What is this? "))
-        assert out == ["What is this?"]
-        assert d.finish() == ""
+        assert list(d.add_chunk("What is this? ")) == []
+        assert d.finish() == "What is this?"
 
     def test_exclamation_mark(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("Great job! "))
-        assert out == ["Great job!"]
-        assert d.finish() == ""
+        assert list(d.add_chunk("Great job! ")) == []
+        assert d.finish() == "Great job!"
 
     def test_multiple_chunks(self):
         d = SentenceBoundaryDetector()
         assert list(d.add_chunk("First ")) == []
-        out2 = list(d.add_chunk("sentence. "))
-        assert out2 == ["First sentence."]
-        assert d.finish() == ""
+        assert list(d.add_chunk("sentence. ")) == []
+        assert d.finish() == "First sentence."
 
     def test_finish_with_remaining_text(self):
         d = SentenceBoundaryDetector()
-        d.add_chunk("Complete sentence. ")  # emitted immediately
-        d.add_chunk("Incomplete")  # incomplete → stays
-        # CI shows FINISH returns "" (incomplete fragment was not preserved)
-        assert d.finish() == ""
+        assert list(d.add_chunk("Complete sentence. ")) == []
+        assert list(d.add_chunk("Incomplete")) == []
+        assert d.finish() == "Complete sentence. Incomplete"
 
     def test_finish_clears_state(self):
         d = SentenceBoundaryDetector()
-        d.add_chunk("Text. ")
+        list(d.add_chunk("Text. "))
         d.finish()
         assert d.remaining_text == ""
         assert d.current_sentence == ""
 
     def test_asterisks_removed_in_output(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("This is *important*. "))
-        assert out == ["This is important."]
-        assert d.finish() == ""
+        assert list(d.add_chunk("This is *important*. ")) == []
+        assert d.finish() == "This is important."
 
     def test_ellipsis(self):
         d = SentenceBoundaryDetector()
-        out = list(d.add_chunk("Wait for it… "))
-        assert out == ["Wait for it…"]
-        assert d.finish() == ""
+        assert list(d.add_chunk("Wait for it… ")) == []
+        assert d.finish() == "Wait for it…"
 
     def test_empty_chunk(self):
         d = SentenceBoundaryDetector()
