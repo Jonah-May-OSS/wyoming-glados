@@ -366,6 +366,7 @@ class TestHandleSynthesize:
     @pytest.mark.asyncio
     async def test_handle_synthesize_tts_error_sends_error_event(self, handler):
         """Test that TTS errors are sent as Error events."""
+
         # Create a process that raises an exception
         async def mock_run_tts_error(text, alpha=1.0):
             raise RuntimeError("TTS failed")
