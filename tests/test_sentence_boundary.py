@@ -12,6 +12,7 @@ CI BEHAVIOR:
 
 import sys
 from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,6 +27,7 @@ from server.sentence_boundary import (
 # ------------------------------------------------------------
 # remove_asterisks tests
 # ------------------------------------------------------------
+
 
 class TestRemoveAsterisks:
     def test_remove_word_asterisks(self):
@@ -56,8 +58,8 @@ class TestRemoveAsterisks:
 # SentenceBoundaryDetector — TRUE CI BEHAVIOR
 # ------------------------------------------------------------
 
-class TestSentenceBoundaryDetector:
 
+class TestSentenceBoundaryDetector:
     def test_single_sentence(self):
         d = SentenceBoundaryDetector()
         assert list(d.add_chunk("Hello world. ")) == []
