@@ -1,30 +1,33 @@
-import sys
-import pytest
 import argparse
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from server.handler import GladosEventHandler
-from server.process import GladosProcessManager, GladosProcess
-from server.sentence_boundary import SentenceBoundaryDetector
 from wyoming.event import Event
 from wyoming.info import Describe, Info
 from wyoming.tts import (
     Synthesize,
-    SynthesizeStart,
     SynthesizeChunk,
+    SynthesizeStart,
     SynthesizeStop,
 )
 
+from server.handler import GladosEventHandler
+from server.process import GladosProcess, GladosProcessManager
+from server.sentence_boundary import SentenceBoundaryDetector
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class DummyAsyncWriter:
     """Valid async writer to inject into the handler."""
+
     def __init__(self):
         self.events = []
 
@@ -34,9 +37,11 @@ class DummyAsyncWriter:
 
 def async_gen(*items):
     """Turn any list of tuples into an async generator."""
+
     async def generator():
         for i in items:
             yield i
+
     return generator()
 
 
@@ -67,6 +72,7 @@ def make_handler(streaming=False):
 # Describe
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_handle_describe():
     handler, mgr, writer = make_handler()
@@ -80,6 +86,7 @@ async def test_handle_describe():
 # ---------------------------------------------------------------------------
 # Non-streaming Synthesize
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_synthesize_basic_path():
@@ -101,6 +108,7 @@ async def test_synthesize_basic_path():
 # Error path
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_synthesize_exception_path():
     handler, mgr, writer = make_handler(streaming=False)
@@ -120,6 +128,7 @@ async def test_synthesize_exception_path():
 # ---------------------------------------------------------------------------
 # Streaming mode
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_stream_start_resets_state():
@@ -166,6 +175,7 @@ async def test_stream_stop_flushes_remaining_text():
 # ---------------------------------------------------------------------------
 # Asterisk removal test
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_asterisk_removal_in_synthesize():
