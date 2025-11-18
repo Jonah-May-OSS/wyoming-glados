@@ -7,7 +7,6 @@ on:
   pull_request:
     branches: [ main ]
     paths-ignore:
-      - '.github/**'
       - '.vscode/**'
       - 'docker/**'
       - 'GitReleaseManager.yaml'
@@ -21,7 +20,7 @@ jobs:
     
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
@@ -107,7 +106,7 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
