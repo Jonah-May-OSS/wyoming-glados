@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from server.process import GladosProcess, GladosProcessManager  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # GladosProcess Logic Tests
 # ---------------------------------------------------------------------------
+
 
 class TestGladosProcessLogic:
     """Test the GladosProcess logic with mocked dependencies."""
@@ -93,6 +93,7 @@ class TestGladosProcessLogic:
 # GladosProcessManager Logic Tests
 # ---------------------------------------------------------------------------
 
+
 class TestGladosProcessManagerLogic:
     """Test the GladosProcessManager logic."""
 
@@ -127,9 +128,7 @@ class TestGladosProcessManagerLogic:
         mgr = GladosProcessManager(mock_runner)
 
         # Hammer the manager with concurrent calls
-        procs = await asyncio.gather(*[
-            mgr.get_process("voice") for _ in range(20)
-        ])
+        procs = await asyncio.gather(*[mgr.get_process("voice") for _ in range(20)])
 
         # All processes should be identical (lock prevents duplicates)
         assert len({id(p) for p in procs}) == 1
