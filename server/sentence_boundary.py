@@ -38,12 +38,10 @@ class SentenceBoundaryDetector:
                 yield remove_asterisks(self.current_sentence.strip())
                 self.current_sentence = ""
 
-            self.remaining_text = self.remaining_text[match.end():].lstrip()
+            self.remaining_text = self.remaining_text[match.end() :].lstrip()
 
         # 🔥 Fallback: if text ends with a sentence-ending punctuation + optional space
-        fallback_match = re.match(
-            rf"^(.*{SENTENCE_END}+)\s*$", self.remaining_text
-        )
+        fallback_match = re.match(rf"^(.*{SENTENCE_END}+)\s*$", self.remaining_text)
         if fallback_match:
             self.current_sentence += fallback_match.group(1)
             sentence = self.current_sentence.strip()
@@ -55,7 +53,7 @@ class SentenceBoundaryDetector:
 
     def finish(self) -> str:
         """Finalize and return the last sentence, clearing state."""
-        combined = (self.current_sentence + self.remaining_text)
+        combined = self.current_sentence + self.remaining_text
         self.current_sentence = ""
         self.remaining_text = ""
 
