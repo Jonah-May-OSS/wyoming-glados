@@ -93,10 +93,8 @@ class GladosEventHandler(AsyncEventHandler):
 
                 _LOGGER.debug("Text stream stopped")
                 return True
-            if not Synthesize.is_type(event.type):
-                return True
-            synthesize = Synthesize.from_event(event)
-            return await self._handle_synthesize(synthesize)
+            # Unknown event type, ignore
+            return True
         except Exception as err:
             await self.write_event(
                 Error(text=str(err), code=err.__class__.__name__).event()
