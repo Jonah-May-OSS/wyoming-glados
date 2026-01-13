@@ -29,9 +29,6 @@ from wyoming.server import AsyncServer
 # -------------------------
 # 3. Local imports
 # -------------------------
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
-
 from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
