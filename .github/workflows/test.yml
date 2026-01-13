@@ -24,7 +24,7 @@ jobs:
         id: wait-for-checks
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: Ruff
+          checkName: ruff
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           timeoutSeconds: 600
           intervalSeconds: 10
