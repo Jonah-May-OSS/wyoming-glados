@@ -10,11 +10,6 @@ CI BEHAVIOR:
 - remove_asterisks() still works normally.
 """
 
-import sys
-from pathlib import Path
-
-import pytest
-
 from server.sentence_boundary import (
     SentenceBoundaryDetector,
     remove_asterisks,
