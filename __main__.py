@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Utility for running the GLaDOS TTS server."""
 
 # -------------------------
@@ -21,21 +22,20 @@ from pathlib import Path
 # -------------------------
 import nltk
 import torch.nn.modules.transformer as _tfm
-
-# -------------------------
-# 3. Local imports
-# -------------------------
-from gladostts.glados import TTSRunner
 from nltk import data as nltk_data
-from server.handler import GladosEventHandler
-from server.process import GladosProcessManager
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
 # -------------------------
-# 4. Runtime constants
+# 3. Local imports
 # -------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from gladostts.glados import TTSRunner
+from server.handler import GladosEventHandler
+from server.process import GladosProcessManager
+
 
 # hide nested tensor warning
 warnings.filterwarnings(
