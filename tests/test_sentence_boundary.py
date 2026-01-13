@@ -10,15 +10,6 @@ CI BEHAVIOR:
 - remove_asterisks() still works normally.
 """
 
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-regex = pytest.importorskip("regex")
-
 from server.sentence_boundary import (
     SentenceBoundaryDetector,
     remove_asterisks,
@@ -122,7 +113,7 @@ class TestSentenceBoundaryDetector:
         # Some environments may emit nothing mid-stream.
         assert out1 in ([], ["Complete sentence."])
 
-        out2 = list(d.add_chunk("Incomplete"))
+        _ = list(d.add_chunk("Incomplete"))
 
         final = d.finish()
 

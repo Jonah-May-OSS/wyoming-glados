@@ -1,11 +1,7 @@
 import hashlib
 import io
 import logging
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 import download
 from download import (
