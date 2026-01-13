@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """Utility for running the GLaDOS TTS server."""
 
 # -------------------------
@@ -34,8 +33,9 @@ from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 
 # -------------------------
-# 4. Code after imports
+# 4. Runtime constants
 # -------------------------
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # hide nested tensor warning
 warnings.filterwarnings(
