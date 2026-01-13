@@ -21,16 +21,16 @@ from pathlib import Path
 # -------------------------
 import nltk
 import torch.nn.modules.transformer as _tfm
-from nltk import data as nltk_data
-from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
-from wyoming.server import AsyncServer
 
 # -------------------------
 # 3. Local imports
 # -------------------------
 from gladostts.glados import TTSRunner
+from nltk import data as nltk_data
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
+from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
+from wyoming.server import AsyncServer
 
 # -------------------------
 # 4. Runtime constants
