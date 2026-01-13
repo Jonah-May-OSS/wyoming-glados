@@ -15,14 +15,14 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-regex = pytest.importorskip("regex")
-
 from server.sentence_boundary import (
     SentenceBoundaryDetector,
     remove_asterisks,
 )
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+regex = pytest.importorskip("regex")
 
 # ------------------------------------------------------------
 # remove_asterisks tests
