@@ -122,7 +122,7 @@ class TestSentenceBoundaryDetector:
         # Some environments may emit nothing mid-stream.
         assert out1 in ([], ["Complete sentence."])
 
-        out2 = list(d.add_chunk("Incomplete"))
+        _ = list(d.add_chunk("Incomplete"))
 
         final = d.finish()
 
