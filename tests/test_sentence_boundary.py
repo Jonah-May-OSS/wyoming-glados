@@ -20,10 +20,6 @@ from server.sentence_boundary import (
     remove_asterisks,
 )
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-regex = pytest.importorskip("regex")
-
 # ------------------------------------------------------------
 # remove_asterisks tests
 # ------------------------------------------------------------
