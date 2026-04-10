@@ -2,9 +2,6 @@
 
 """Utility for running the GLaDOS TTS server."""
 
-# -------------------------
-# 1. Standard library
-# -------------------------
 import argparse
 import asyncio
 import contextlib
@@ -18,18 +15,12 @@ from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
-# -------------------------
-# 2. Third-party libraries
-# -------------------------
 import nltk
 import torch.nn.modules.transformer as _tfm
 from nltk import data as nltk_data
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
-# -------------------------
-# 3. Local imports
-# -------------------------
 from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
