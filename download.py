@@ -35,13 +35,19 @@ def get_file_hash(path: Path, bytes_per_chunk: int = 8192) -> str:
     return md5_hash.hexdigest()
 
 
-def is_valid_file(file_path: Path, expected_md5: str) -> bool:
+def is_valid_file(file_path: Path, expected_md5: str | None) -> bool:
     """Check if the file exists, is of sufficient size, and matches the MD5 hash."""
     if not file_path.exists():
         return False
     if file_path.stat().st_size < 1024:
         _LOGGER.warning("File %s is too small.", file_path)
         return False
+
+    # Some artifacts (e.g., locally rebuilt TensorRT engines) are expected
+    # to differ from the release hash across machines/runtime versions.
+    if expected_md5 is None:
+        return True
+
     md5_hash = get_file_hash(file_path)
     if md5_hash != expected_md5:
         _LOGGER.warning(
@@ -81,7 +87,8 @@ def ensure_model_exists(download_dir: Path, base_url: str):
         },
         {
             "filename": "vocoder-trt.ts",
-            "md5": "57990678b466251884a43ccc2ca7dda4",
+            # Allow locally rebuilt TRT engines to persist across restarts.
+            "md5": None,
         },
     ]
 
