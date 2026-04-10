@@ -166,6 +166,10 @@ class GladosEventHandler(AsyncEventHandler):
             await self.write_event(
                 Error(text=str(e), code="TTSProcessingError").event()
             )
+            if self.audio_started:
+                await self.write_event(AudioStop().event())
+                self.audio_started = False
+                _LOGGER.debug("Audio stream reset after synthesis error.")
 
         if send_stop:
             await self.write_event(AudioStop().event())
