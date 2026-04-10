@@ -19,8 +19,10 @@ jobs:
           fetch-depth: 0
 
       - name: Extract version from branch name
+        id: extract_version
         run: |
           VERSION=${GITHUB_REF#refs/heads/release/}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Zip Release
@@ -29,15 +31,15 @@ jobs:
       - name: Install GitReleaseManager
         uses: gittools/actions/gitreleasemanager/setup@40f115e87851d46e8924ae3aa57f006b0e84268c
         with:
-          versionSpec: '0.20.x'
+          versionSpec: '0.22.x'
 
       - name: Create release with GitReleaseManager
         uses: gittools/actions/gitreleasemanager/create@40f115e87851d46e8924ae3aa57f006b0e84268c
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          milestone: ${{ env.VERSION }}
-          name: ${{ env.VERSION }}
+          milestone: ${{ steps.extract_version.outputs.version }}
+          name: ${{ steps.extract_version.outputs.version }}
           assets: |
             release.zip
 
@@ -46,11 +48,11 @@ jobs:
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          milestone: ${{ env.VERSION }}
+          milestone: ${{ steps.extract_version.outputs.version }}
 
       - name: Close release with GitReleaseManager
         uses: gittools/actions/gitreleasemanager/close@40f115e87851d46e8924ae3aa57f006b0e84268c
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          milestone: ${{ github.ref_name }}
+          milestone: ${{ steps.extract_version.outputs.version }}
