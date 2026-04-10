@@ -4,17 +4,12 @@ These are unit tests that test the logic without requiring heavy dependencies.
 """
 
 import asyncio
-import sys
 import time
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from server.process import GladosProcess, GladosProcessManager  # noqa: E402
+from server.process import GladosProcess, GladosProcessManager
 
 # ---------------------------------------------------------------------------
 # GladosProcess Logic Tests
@@ -46,7 +41,8 @@ class TestGladosProcessLogic:
         mock_audio.sample_width = 2
         mock_audio.channels = 1
 
-        mock_runner.run_tts.return_value = mock_audio
+        run_tts_mock = MagicMock(return_value=mock_audio)
+        mock_runner.run_tts = run_tts_mock
 
         p = GladosProcess("default", mock_runner)
 
@@ -55,10 +51,12 @@ class TestGladosProcessLogic:
             results.append(chunk)
 
         assert len(results) == 1
-        raw, rate, width, ch = results[0]
+        raw, rate, _, _ = results[0]
         assert raw == b"audio_data"
         assert rate == 22050
-        mock_runner.run_tts.assert_called_once_with("Test text", 1.0)
+        assert run_tts_mock.call_count == 1
+        assert run_tts_mock.call_args is not None
+        assert run_tts_mock.call_args.args == ("Test text", 1.0)
 
     @pytest.mark.asyncio
     async def test_async_generator_pattern(self):

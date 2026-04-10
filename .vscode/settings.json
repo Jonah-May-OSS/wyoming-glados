@@ -8,5 +8,12 @@
     ,
     // Use the project's virtual environment for the Python extension and testing
     "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-    "python.testing.pytestPath": "${workspaceFolder}\\.venv\\Scripts\\pytest.exe"
+    "python.testing.pytestPath": "${workspaceFolder}\\.venv\\Scripts\\pytest.exe",
+    "python.linting.pylintArgs": [],
+    "pylint.args": [],
+    "pylint.path": [
+        "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pylint"
+    ]
 }

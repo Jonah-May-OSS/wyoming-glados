@@ -5,39 +5,42 @@ These are unit tests that test the handler logic with mocked dependencies.
 
 import argparse
 import asyncio
-import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from wyoming.event import Event
-from wyoming.info import Describe, Info, TtsProgram, TtsVoice
+from wyoming.info import Attribution, Describe, Info, TtsProgram, TtsVoice
 from wyoming.tts import Synthesize, SynthesizeChunk, SynthesizeStart, SynthesizeStop
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from server.handler import GladosEventHandler
+from server.process import GladosProcess, GladosProcessManager
 
-from server.handler import GladosEventHandler  # noqa: E402
-from server.process import GladosProcess, GladosProcessManager  # noqa: E402
+
+def _private_attr(obj, attr_name):
+    return object.__getattribute__(obj, attr_name)
+
+
+async def _call_private_async(obj, attr_name, *args, **kwargs):
+    method = object.__getattribute__(obj, attr_name)
+    return await method(*args, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Helper Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def mock_cli_args():
+@pytest.fixture(name="mock_cli_args")
+def fixture_mock_cli_args():
     """Create mock CLI arguments."""
     args = argparse.Namespace()
     args.streaming = True
     return args
 
 
-@pytest.fixture
-def mock_wyoming_info():
+@pytest.fixture(name="mock_wyoming_info")
+def fixture_mock_wyoming_info():
     """Create mock Wyoming Info object."""
-    from wyoming.info import Attribution
-
     return Info(
         tts=[
             TtsProgram(
@@ -67,13 +70,13 @@ def mock_wyoming_info():
     )
 
 
-@pytest.fixture
-def mock_process_manager():
+@pytest.fixture(name="mock_process_manager")
+def fixture_mock_process_manager():
     """Create a mock process manager."""
     manager = MagicMock(spec=GladosProcessManager)
 
     # Create a mock process that returns async generator
-    async def mock_run_tts(text, alpha=1.0):
+    async def mock_run_tts(*_args, **_kwargs):
         yield b"audio_data", 22050, 2, 1
 
     mock_process = MagicMock(spec=GladosProcess)
@@ -85,8 +88,8 @@ def mock_process_manager():
     return manager
 
 
-@pytest.fixture
-def handler(mock_cli_args, mock_wyoming_info, mock_process_manager):
+@pytest.fixture(name="handler")
+def fixture_handler(mock_cli_args, mock_wyoming_info, mock_process_manager):
     """Create a GladosEventHandler instance for testing."""
     # Create mock reader and writer for AsyncEventHandler
     mock_reader = MagicMock(spec=asyncio.StreamReader)
@@ -130,7 +133,7 @@ class TestGladosEventHandlerInit:
         assert handler.cli_args == mock_cli_args
         assert handler.process_manager == mock_process_manager
         assert handler.is_streaming is None
-        assert handler._synthesize is None
+        assert _private_attr(handler, "_synthesize") is None
         assert handler.audio_started is False
         assert handler.sbd is not None
 
@@ -144,7 +147,7 @@ class TestDescribeEvent:
     """Test Describe event handling."""
 
     @pytest.mark.asyncio
-    async def test_describe_event_sends_info(self, handler, mock_wyoming_info):
+    async def test_describe_event_sends_info(self, handler):
         """Test that Describe event triggers info response."""
         event = Describe().event()
 
@@ -212,8 +215,9 @@ class TestStreamingEvents:
 
         assert result is True
         assert handler.is_streaming is True
-        assert handler._synthesize is not None
-        assert handler._synthesize.text == ""
+        synthesize_state = _private_attr(handler, "_synthesize")
+        assert synthesize_state is not None
+        assert synthesize_state.text == ""
 
     @pytest.mark.asyncio
     async def test_synthesize_chunk_event(self, handler):
@@ -232,8 +236,25 @@ class TestStreamingEvents:
         result = await handler.handle_event(event)
 
         assert result is True
-        # Should have sent audio events for the complete sentence
-        assert handler.write_event.call_count >= 3  # AudioStart, AudioChunk, AudioStop
+        # In streaming mode, chunk handling keeps the audio stream open.
+        assert handler.write_event.call_count >= 2  # AudioStart, AudioChunk
+
+    @pytest.mark.asyncio
+    async def test_synthesize_chunk_event_with_long_clause(self, handler):
+        """Test that long clauses can be synthesized before sentence end."""
+        stream_start = SynthesizeStart(voice=None)
+        await handler.handle_event(stream_start.event())
+
+        handler.write_event.reset_mock()
+
+        stream_chunk = SynthesizeChunk(
+            text="This is a fairly long opening clause, and the rest can stay buffered"
+        )
+
+        result = await handler.handle_event(stream_chunk.event())
+
+        assert result is True
+        assert handler.write_event.call_count >= 2
 
     @pytest.mark.asyncio
     async def test_synthesize_chunk_incomplete_sentence(self, handler):
@@ -300,7 +321,7 @@ class TestStreamingEvents:
         handler.write_event.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_streaming_disabled_in_args(self, handler, mock_cli_args):
+    async def test_streaming_disabled_in_args(self, handler):
         """Test that streaming events are ignored when streaming is disabled."""
         handler.cli_args.streaming = False
 
@@ -321,7 +342,7 @@ class TestHandleSynthesize:
         """Test that _handle_synthesize sends proper audio events."""
         synthesize = Synthesize(text="Test", voice=None)
 
-        result = await handler._handle_synthesize(synthesize)
+        result = await _call_private_async(handler, "_handle_synthesize", synthesize)
 
         assert result is True
         assert handler.write_event.call_count >= 3
@@ -336,21 +357,21 @@ class TestHandleSynthesize:
 
     @pytest.mark.asyncio
     async def test_handle_synthesize_audio_start_sent_once(self, handler):
-        """Test that AudioStart is only sent once per handler lifetime."""
+        """Test that AudioStart is sent once per synth request by default."""
         synthesize = Synthesize(text="Test", voice=None)
 
         # First call
-        await handler._handle_synthesize(synthesize)
+        await _call_private_async(handler, "_handle_synthesize", synthesize)
         first_count = handler.write_event.call_count
 
         handler.write_event.reset_mock()
 
         # Second call
-        await handler._handle_synthesize(synthesize)
+        await _call_private_async(handler, "_handle_synthesize", synthesize)
         second_count = handler.write_event.call_count
 
-        # Second call should have one fewer event (no AudioStart)
-        assert second_count == first_count - 1
+        # Default calls send start/chunk/stop for each independent request.
+        assert second_count == first_count
 
     @pytest.mark.asyncio
     async def test_handle_synthesize_exception_handling(self, handler):
@@ -361,16 +382,22 @@ class TestHandleSynthesize:
         synthesize = Synthesize(text="Test", voice=None)
 
         with pytest.raises(RuntimeError):
-            await handler._handle_synthesize(synthesize)
+            await _call_private_async(handler, "_handle_synthesize", synthesize)
 
     @pytest.mark.asyncio
     async def test_handle_synthesize_tts_error_sends_error_event(self, handler):
         """Test that TTS errors are sent as Error events."""
 
         # Create a process that raises an exception
-        async def mock_run_tts_error(text, alpha=1.0):
-            raise RuntimeError("TTS failed")
-            yield  # Make it a generator
+        class _FailingAudioIterator:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise RuntimeError("TTS failed")
+
+        def mock_run_tts_error(*_args, **_kwargs):
+            return _FailingAudioIterator()
 
         mock_process = MagicMock(spec=GladosProcess)
         mock_process.run_tts = mock_run_tts_error
@@ -378,7 +405,7 @@ class TestHandleSynthesize:
 
         synthesize = Synthesize(text="Test", voice=None)
 
-        result = await handler._handle_synthesize(synthesize)
+        result = await _call_private_async(handler, "_handle_synthesize", synthesize)
 
         assert result is True
         # Should have sent Error event and AudioStop

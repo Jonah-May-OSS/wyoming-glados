@@ -62,3 +62,47 @@ omit = [
 omit = [
     "tests/*",
 ]
+
+[tool.pyright]
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
+include = [
+    "__main__.py",
+    "download.py",
+    "server",
+    "gladostts",
+]
+exclude = [
+    "tests",
+    "docker",
+    "htmlcov",
+    ".venv",
+    "**/.git",
+    "**/.hg",
+    "**/.svn",
+    "**/.*",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.mypy_cache",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+    "gladostts/models",
+]
+reportMissingModuleSource = "none"
+reportMissingTypeStubs = "none"
+reportDeprecated = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportUnknownLambdaType = "none"
+reportUnnecessaryCast = "none"
+strict = [
+    "download.py",
+    "server",
+]
+executionEnvironments = [
+    { root = ".", extraPaths = ["."] },
+]
