@@ -31,7 +31,7 @@ jobs:
       - name: Install GitReleaseManager
         uses: gittools/actions/gitreleasemanager/setup@40f115e87851d46e8924ae3aa57f006b0e84268c
         with:
-          versionSpec: '0.22.x'
+          versionSpec: '0.20.0'
 
       - name: Create release with GitReleaseManager
         uses: gittools/actions/gitreleasemanager/create@40f115e87851d46e8924ae3aa57f006b0e84268c
