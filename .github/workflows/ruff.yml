@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+        with:
+          # Use a PAT if provided so downstream workflows trigger on bot pushes.
+          token: ${{ secrets.CI_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Ruff Check (Auto-fix)
         uses: astral-sh/ruff-action@v3
         with:
@@ -34,8 +37,14 @@ jobs:
       - name: Commit auto-fixes
         if: steps.changes.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
+        env:
+          CI_PUSH_TOKEN: ${{ secrets.CI_PUSH_TOKEN }}
         run: |
           BRANCH="${{ github.event.pull_request.head.ref }}"
+
+          if [ -z "$CI_PUSH_TOKEN" ]; then
+            echo "CI_PUSH_TOKEN is not set. Using GITHUB_TOKEN; downstream workflows may not trigger from this push."
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
