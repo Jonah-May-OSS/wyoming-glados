@@ -11,7 +11,16 @@ def pytest_configure(config):
     # Mock heavy dependencies that are not needed for unit tests
 
     # If Wyoming is available, don't mock it.
-    if importlib.util.find_spec("wyoming") is None and "wyoming" not in sys.modules:
+    if "wyoming" not in sys.modules:
+        try:
+            wyoming_available = importlib.util.find_spec("wyoming") is not None
+        except ValueError:
+            # Some tests install placeholder modules with __spec__=None.
+            wyoming_available = False
+    else:
+        wyoming_available = True
+
+    if not wyoming_available:
         # Mock wyoming if not available
         wyoming_mock = MagicMock()
         sys.modules["wyoming"] = wyoming_mock
