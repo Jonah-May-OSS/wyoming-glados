@@ -28,7 +28,8 @@ class GladosProcess:
     ) -> AsyncGenerator[tuple[bytes | None, int, int, int], None]:
         """Process the text and handle TTS output."""
         try:
-            audio_segment: Any = self.runner.run_tts(text, alpha)
+            # Offload synchronous model inference so concurrent clients don't block the loop.
+            audio_segment: Any = await asyncio.to_thread(self.runner.run_tts, text, alpha)
             yield (
                 audio_segment.raw_data,
                 audio_segment.frame_rate,
