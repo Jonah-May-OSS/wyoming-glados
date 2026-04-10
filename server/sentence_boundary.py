@@ -24,7 +24,6 @@ class SentenceBoundaryDetector:
 
     def __init__(self, min_clause_words: int = MIN_CLAUSE_WORDS) -> None:
         self.remaining_text = ""
-        self.current_sentence = ""
         self.min_clause_words = min_clause_words
 
     def add_chunk(self, chunk: str) -> Iterable[str]:
@@ -42,7 +41,6 @@ class SentenceBoundaryDetector:
         """Finalize and return the last sentence, clearing state."""
         text = self.remaining_text.strip()
         self.remaining_text = ""
-        self.current_sentence = ""
         return remove_asterisks(text)
 
     def _get_next_segment(self) -> str | None:

@@ -98,7 +98,6 @@ class TestSentenceBoundaryDetector:
         list(d.add_chunk("Text. "))
         d.finish()
         assert d.remaining_text == ""
-        assert d.current_sentence == ""
 
     def test_asterisks_removed_in_output(self):
         d = SentenceBoundaryDetector()

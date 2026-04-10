@@ -121,7 +121,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
                 )
                 if model_file_path.exists():
                     model_file_path.unlink()
-        except OSError:
+        except Exception:
             _LOGGER.exception(
                 "Failed to download %s from %s",
                 model_file_path,
