@@ -64,7 +64,7 @@ omit = [
 ]
 
 [tool.pyright]
-pythonVersion = "3.11"
+pythonVersion = "3.13"
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "basic"
