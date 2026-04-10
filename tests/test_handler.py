@@ -232,8 +232,8 @@ class TestStreamingEvents:
         result = await handler.handle_event(event)
 
         assert result is True
-        # Should have sent audio events for the complete sentence
-        assert handler.write_event.call_count >= 3  # AudioStart, AudioChunk, AudioStop
+        # In streaming mode, chunk handling keeps the audio stream open.
+        assert handler.write_event.call_count >= 2  # AudioStart, AudioChunk
 
     @pytest.mark.asyncio
     async def test_synthesize_chunk_incomplete_sentence(self, handler):
@@ -336,7 +336,7 @@ class TestHandleSynthesize:
 
     @pytest.mark.asyncio
     async def test_handle_synthesize_audio_start_sent_once(self, handler):
-        """Test that AudioStart is only sent once per handler lifetime."""
+        """Test that AudioStart is sent once per synth request by default."""
         synthesize = Synthesize(text="Test", voice=None)
 
         # First call
@@ -349,8 +349,8 @@ class TestHandleSynthesize:
         await handler._handle_synthesize(synthesize)
         second_count = handler.write_event.call_count
 
-        # Second call should have one fewer event (no AudioStart)
-        assert second_count == first_count - 1
+        # Default calls send start/chunk/stop for each independent request.
+        assert second_count == first_count
 
     @pytest.mark.asyncio
     async def test_handle_synthesize_exception_handling(self, handler):

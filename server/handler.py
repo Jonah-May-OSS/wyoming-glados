@@ -57,7 +57,8 @@ class GladosEventHandler(AsyncEventHandler):
 
                 synthesize = Synthesize.from_event(event)
                 synthesize.text = remove_asterisks(synthesize.text)
-                return await self._handle_synthesize(synthesize)
+                self.audio_started = False
+                return await self._handle_synthesize(synthesize, send_stop=True)
             if not self.cli_args.streaming:
                 return True
             if SynthesizeStart.is_type(event.type):
@@ -65,6 +66,7 @@ class GladosEventHandler(AsyncEventHandler):
                 self.is_streaming = True
                 self.sbd = SentenceBoundaryDetector()
                 self._synthesize = Synthesize(text="", voice=stream_start.voice)
+                self.audio_started = False
                 _LOGGER.debug("Text stream started: voice=%s", stream_start.voice)
                 return True
             if SynthesizeChunk.is_type(event.type):
@@ -78,7 +80,7 @@ class GladosEventHandler(AsyncEventHandler):
 
                     # Handle the synthesis (e.g., convert text to PCM, send AudioChunks)
 
-                    await self._handle_synthesize(self._synthesize)
+                    await self._handle_synthesize(self._synthesize, send_stop=False)
                 return True
             if SynthesizeStop.is_type(event.type):
                 assert self._synthesize is not None
@@ -86,7 +88,13 @@ class GladosEventHandler(AsyncEventHandler):
                 if self._synthesize.text:
                     # Final audio chunk(s)
 
-                    await self._handle_synthesize(self._synthesize)
+                    await self._handle_synthesize(self._synthesize, send_stop=False)
+
+                if self.audio_started:
+                    await self.write_event(AudioStop().event())
+                    self.audio_started = False
+
+                self.is_streaming = False
                 # End of audio
 
                 await self.write_event(SynthesizeStopped().event())
@@ -101,7 +109,9 @@ class GladosEventHandler(AsyncEventHandler):
             )
             raise err
 
-    async def _handle_synthesize(self, synthesize: Synthesize) -> bool:
+    async def _handle_synthesize(
+        self, synthesize: Synthesize, send_stop: bool = True
+    ) -> bool:
         _LOGGER.debug(synthesize)
 
         glados_proc = await self.process_manager.get_process()
@@ -132,7 +142,10 @@ class GladosEventHandler(AsyncEventHandler):
             await self.write_event(
                 Error(text=str(e), code="TTSProcessingError").event()
             )
-        await self.write_event(AudioStop().event())
+
+        if send_stop:
+            await self.write_event(AudioStop().event())
+            self.audio_started = False
         # Stop the audio stream when done
 
         _LOGGER.debug("Completed request")

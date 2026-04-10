@@ -62,3 +62,25 @@ omit = [
 omit = [
     "tests/*",
 ]
+
+[tool.pyright]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "strict"
+include = [
+    "__main__.py",
+    "download.py",
+    "server",
+    "tests",
+]
+exclude = [
+    "gladostts",
+    "docker",
+    "htmlcov",
+    ".venv",
+    "**/__pycache__",
+]
+executionEnvironments = [
+    { root = ".", extraPaths = ["."] },
+]
