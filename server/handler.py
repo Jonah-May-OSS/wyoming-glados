@@ -120,6 +120,11 @@ class GladosEventHandler(AsyncEventHandler):
         _LOGGER.debug(synthesize)
 
         glados_proc = await self.process_manager.get_process()
+        total_chunks_sent = 0
+        samples_per_chunk = max(
+            1,
+            int(getattr(self.cli_args, "samples_per_chunk", 1024)),
+        )
 
         try:
             # Start processing with run_tts
@@ -137,14 +142,25 @@ class GladosEventHandler(AsyncEventHandler):
                         AudioStart(rate=rate, width=width, channels=channels).event()
                     )
                     self.audio_started = True
-                # Send audio chunk as soon as it's generated
 
-                await self.write_event(
-                    AudioChunk(
-                        audio=pcm, rate=rate, width=width, channels=channels
-                    ).event()
-                )
-            _LOGGER.debug("Sent AudioChunk event for chunk: %s", synthesize.text)
+                # Keep sentence-level synthesis quality, but stream PCM in transport-sized chunks.
+                bytes_per_chunk = max(1, width * channels * samples_per_chunk)
+                for offset in range(0, len(pcm), bytes_per_chunk):
+                    await self.write_event(
+                        AudioChunk(
+                            audio=pcm[offset : offset + bytes_per_chunk],
+                            rate=rate,
+                            width=width,
+                            channels=channels,
+                        ).event()
+                    )
+                    total_chunks_sent += 1
+
+            _LOGGER.debug(
+                "Sent %s AudioChunk events for chunk: %s",
+                total_chunks_sent,
+                synthesize.text,
+            )
         except Exception as e:
             _LOGGER.error("Error during TTS processing: %s", e)
             await self.write_event(
