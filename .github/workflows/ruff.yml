@@ -35,8 +35,21 @@ jobs:
         if: steps.changes.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Apply Ruff auto-fixes"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
+          # Rebase bot commit on latest branch tip to avoid non-fast-forward push failures.
+          for attempt in 1 2 3; do
+            git fetch origin "$BRANCH"
+            git rebase "origin/$BRANCH"
+            if git push origin "HEAD:$BRANCH"; then
+              exit 0
+            fi
+          done
+
+          echo "Failed to push Ruff auto-fixes after 3 attempts."
+          exit 1
