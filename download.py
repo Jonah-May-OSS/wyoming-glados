@@ -89,6 +89,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
         model_file = model["filename"]
         model_file_path = download_dir / model_file
         model_file_path.parent.mkdir(parents=True, exist_ok=True)
+        model_url = ""
 
         if is_valid_file(model_file_path, model["md5"]):
             _LOGGER.info("File %s is valid.", model_file_path)
@@ -100,7 +101,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
         # Download the file
 
         try:
-            filename = model_file.split("/")[-1]
+            filename = model_file.rsplit("/", maxsplit=1)[-1]
             model_url = base_url.format(file=filename)
             _LOGGER.info("Downloading %s to %s", model_url, model_file_path)
             with (
@@ -120,7 +121,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
                 )
                 if model_file_path.exists():
                     model_file_path.unlink()
-        except Exception:
+        except OSError:
             _LOGGER.exception(
                 "Failed to download %s from %s",
                 model_file_path,

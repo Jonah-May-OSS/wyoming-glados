@@ -1,5 +1,8 @@
+"""Event handler implementation for Wyoming GLaDOS TTS events."""
+
 import argparse
 import logging
+from typing import Any
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
@@ -21,13 +24,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class GladosEventHandler(AsyncEventHandler):
+    """Handle Wyoming TTS events for one client connection."""
+
     def __init__(
         self,
         wyoming_info: Info,
         cli_args: argparse.Namespace,
         process_manager: GladosProcessManager,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
 
@@ -122,6 +127,9 @@ class GladosEventHandler(AsyncEventHandler):
             async for pcm, rate, width, channels in glados_proc.run_tts(
                 synthesize.text
             ):
+                if pcm is None:
+                    continue
+
                 # Send AudioStart event if it's not already sent
 
                 if not self.audio_started:
@@ -136,9 +144,9 @@ class GladosEventHandler(AsyncEventHandler):
                         audio=pcm, rate=rate, width=width, channels=channels
                     ).event()
                 )
-            _LOGGER.debug(f"Sent AudioChunk event for chunk: {synthesize.text}")
+            _LOGGER.debug("Sent AudioChunk event for chunk: %s", synthesize.text)
         except Exception as e:
-            _LOGGER.error(f"Error during TTS processing: {e}")
+            _LOGGER.error("Error during TTS processing: %s", e)
             await self.write_event(
                 Error(text=str(e), code="TTSProcessingError").event()
             )

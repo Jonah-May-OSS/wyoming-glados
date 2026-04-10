@@ -1,3 +1,5 @@
+"""Unit tests for model download and validation helpers."""
+
 import hashlib
 import io
 import logging
@@ -123,7 +125,7 @@ def test_ensure_model_exists_removes_invalid_and_downloads(tmp_path):
     bad_file.parent.mkdir(parents=True, exist_ok=True)
     bad_file.write_bytes(b"bad")
 
-    def fake_is_valid_file(path, expected):
+    def fake_is_valid_file(path, _expected):
         if path.name == "glados-new.pt":
             fake_is_valid_file.count += 1
             return fake_is_valid_file.count > 1
@@ -167,7 +169,7 @@ def test_ensure_model_exists_download_exception_hits_except(
     file_path.write_text("partial")
 
     # Only fail for glados-new.pt
-    def fake_is_valid(path, md5):
+    def fake_is_valid(path, _md5):
         return path.name != "glados-new.pt"
 
     monkeypatch.setattr(download, "is_valid_file", fake_is_valid)
@@ -200,7 +202,7 @@ def test_ensure_model_exists_md5_mismatch_after_download(tmp_path, monkeypatch, 
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     # First model invalid → triggers download
-    def fake_is_valid(path, md5):
+    def fake_is_valid(path, _md5):
         return path.name != "glados-new.pt"
 
     monkeypatch.setattr(download, "is_valid_file", fake_is_valid)

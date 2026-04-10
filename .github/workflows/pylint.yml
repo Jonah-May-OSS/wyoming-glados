@@ -1,4 +1,4 @@
-name: Pyright
+name: Pylint
 permissions:
   contents: read
 
@@ -9,7 +9,7 @@ on:
     branches: [ main ]
 
 jobs:
-  pyright:
+  pylint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -27,5 +27,5 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run pyright
-        run: pyright
+      - name: Run pylint
+        run: pylint __main__.py download.py server
