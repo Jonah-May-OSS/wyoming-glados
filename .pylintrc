@@ -1,0 +1,24 @@
+[MASTER]
+init-hook='import sys, pathlib; sys.path.insert(0, str(pathlib.Path().resolve()))'
+ignore=__pycache__
+
+[BASIC]
+const-rgx=^(_?[a-z][a-z0-9_]*|[A-Z][A-Z0-9_]*)$
+no-docstring-rgx=^(_|test_|Test|mock_|pytest_|setup_|teardown_)
+
+[DESIGN]
+max-args=7
+max-attributes=15
+max-positional-arguments=7
+max-returns=10
+max-statements=70
+min-public-methods=1
+
+[EXCEPTIONS]
+overgeneral-exceptions=builtins.BaseException
+
+[SIMILARITIES]
+min-similarity-lines=12
+
+[FORMAT]
+max-line-length=100

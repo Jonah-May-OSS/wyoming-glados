@@ -2,9 +2,6 @@
 
 """Utility for running the GLaDOS TTS server."""
 
-# -------------------------
-# 1. Standard library
-# -------------------------
 import argparse
 import asyncio
 import contextlib
@@ -16,26 +13,19 @@ import time
 import warnings
 from functools import partial
 from pathlib import Path
+from typing import Any, cast
 
-# -------------------------
-# 2. Third-party libraries
-# -------------------------
 import nltk
 import torch.nn.modules.transformer as _tfm
+from gladostts.glados import TTSRunner
 from nltk import data as nltk_data
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
-# -------------------------
-# 3. Local imports
-# -------------------------
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
-
-from gladostts.glados import TTSRunner
-
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # hide nested tensor warning
 warnings.filterwarnings(
@@ -45,7 +35,7 @@ warnings.filterwarnings(
 )
 
 # actually disable it
-_tfm.enable_nested_tensor = False
+cast(Any, _tfm).enable_nested_tensor = False
 
 # logger
 logger = logging.getLogger(__name__)
@@ -63,6 +53,7 @@ class NanosecondFormatter(logging.Formatter):
 
 
 def setup_logging(debug: bool, log_format: str) -> None:
+    """Configure root logging handlers and verbosity."""
     formatter = NanosecondFormatter(log_format)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
@@ -158,7 +149,7 @@ async def main() -> None:
             attribution=voice_attribution,
             installed=True,
             languages=["en"],
-            version=2,
+            version="2",
         )
     ]
 
@@ -172,7 +163,7 @@ async def main() -> None:
                 attribution=voice_attribution,
                 installed=True,
                 voices=voices,
-                version=2,
+                version="2",
                 supports_synthesize_streaming=True,  # ← ADDED
             )
         ],
@@ -191,9 +182,10 @@ async def main() -> None:
     # Sanity-check RNN weights for cuDNN
 
     try:
-        glados_tts.glados.rnn.flatten_parameters()
+        glados_model = cast(Any, glados_tts.glados)
+        glados_model.rnn.flatten_parameters()
         logger.debug("Flattened RNN weights for best cuDNN performance.")
-    except Exception:
+    except (AttributeError, RuntimeError):
         logger.debug("No .rnn to flatten (or already contiguous).")
     # Ensure NLTK 'punkt' data is downloaded
 
@@ -227,12 +219,13 @@ async def main() -> None:
 
     try:
         await server.run(handler_factory)
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.exception("An error occurred while running the server: %s", e)
         sys.exit(1)
 
 
 def run():
+    """Run the async main entrypoint."""
     asyncio.run(main())
 
 

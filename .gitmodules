@@ -1,3 +1,4 @@
 [submodule "gladostts"]
 	path = gladostts
 	url = https://github.com/JonahMMay/glados-tts.git
+	branch = main

@@ -1,6 +1,10 @@
+"""Process and process-manager helpers for the GLaDOS TTS runner."""
+
 import asyncio
 import logging
 import time
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from gladostts.glados import TTSRunner  # Import your TTSRunner from glados.py
 
@@ -16,13 +20,18 @@ class GladosProcess:
         self.last_used = time.monotonic_ns()
 
     def is_multispeaker(self) -> bool:
-        """Check if the model has multiple speakers (example method, modify as needed)."""
+        """Return whether this process supports multiple speakers."""
         return False  # Assuming GLaDOS doesn't support multiple speakers in this case
 
-    async def run_tts(self, text: str, alpha: float = 1.0):
+    async def run_tts(
+        self, text: str, alpha: float = 1.0
+    ) -> AsyncGenerator[tuple[bytes | None, int, int, int], None]:
         """Process the text and handle TTS output."""
         try:
-            audio_segment = self.runner.run_tts(text, alpha)
+            # Offload synchronous model inference so concurrent clients don't block the loop.
+            audio_segment: Any = await asyncio.to_thread(
+                self.runner.run_tts, text, alpha
+            )
             yield (
                 audio_segment.raw_data,
                 audio_segment.frame_rate,
@@ -30,7 +39,9 @@ class GladosProcess:
                 audio_segment.channels,
             )
         except Exception as e:
-            _LOGGER.error(f"TTS processing failed for text: {text[:50]}... Error: {e}")
+            _LOGGER.error(
+                "TTS processing failed for text: %s... Error: %s", text[:50], e
+            )
             raise
 
 
@@ -40,7 +51,7 @@ class GladosProcessManager:
     def __init__(self, runner: TTSRunner) -> None:
         """Initialize the TTS process manager with an existing TTSRunner."""
         self.runner = runner  # Use the passed-in runner, don't initialize a new one
-        self.processes = {}
+        self.processes: dict[str, GladosProcess] = {}
         self.processes_lock = asyncio.Lock()  # Lock for thread safety
         _LOGGER.debug("Glados TTS process manager initialized.")
 
@@ -52,7 +63,7 @@ class GladosProcessManager:
             if voice_name not in self.processes:
                 # Initialize a new process if it doesn't exist
 
-                _LOGGER.debug(f"Initializing new process for voice: {voice_name}")
+                _LOGGER.debug("Initializing new process for voice: %s", voice_name)
                 self.processes[voice_name] = GladosProcess(voice_name, self.runner)
             # Update last used timestamp
 

@@ -21,16 +21,36 @@ jobs:
     steps:
       - name: Wait for Ruff checks
         uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be
-        id: wait-for-checks
+        id: wait-ruff
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           checkName: ruff
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           timeoutSeconds: 600
           intervalSeconds: 10
-      
+
+      - name: Wait for Pylint checks
+        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be
+        id: wait-pylint
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checkName: pylint
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          timeoutSeconds: 600
+          intervalSeconds: 10
+
+      - name: Wait for Pyright checks
+        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be
+        id: wait-pyright
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checkName: pyright
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          timeoutSeconds: 600
+          intervalSeconds: 10
+
       - name: Fail if checks did not succeed
-        if: steps.wait-for-checks.outputs.conclusion != 'success'
+        if: steps.wait-ruff.outputs.conclusion != 'success' || steps.wait-pylint.outputs.conclusion != 'success' || steps.wait-pyright.outputs.conclusion != 'success'
         run: exit 1
 
   test_linux:

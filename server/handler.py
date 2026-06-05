@@ -1,5 +1,8 @@
+"""Event handler implementation for Wyoming GLaDOS TTS events."""
+
 import argparse
 import logging
+from typing import Any
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
@@ -21,13 +24,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class GladosEventHandler(AsyncEventHandler):
+    """Handle Wyoming TTS events for one client connection."""
+
     def __init__(
         self,
         wyoming_info: Info,
         cli_args: argparse.Namespace,
         process_manager: GladosProcessManager,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
 
@@ -57,7 +62,8 @@ class GladosEventHandler(AsyncEventHandler):
 
                 synthesize = Synthesize.from_event(event)
                 synthesize.text = remove_asterisks(synthesize.text)
-                return await self._handle_synthesize(synthesize)
+                self.audio_started = False
+                return await self._handle_synthesize(synthesize, send_stop=True)
             if not self.cli_args.streaming:
                 return True
             if SynthesizeStart.is_type(event.type):
@@ -65,6 +71,7 @@ class GladosEventHandler(AsyncEventHandler):
                 self.is_streaming = True
                 self.sbd = SentenceBoundaryDetector()
                 self._synthesize = Synthesize(text="", voice=stream_start.voice)
+                self.audio_started = False
                 _LOGGER.debug("Text stream started: voice=%s", stream_start.voice)
                 return True
             if SynthesizeChunk.is_type(event.type):
@@ -78,7 +85,7 @@ class GladosEventHandler(AsyncEventHandler):
 
                     # Handle the synthesis (e.g., convert text to PCM, send AudioChunks)
 
-                    await self._handle_synthesize(self._synthesize)
+                    await self._handle_synthesize(self._synthesize, send_stop=False)
                 return True
             if SynthesizeStop.is_type(event.type):
                 assert self._synthesize is not None
@@ -86,7 +93,13 @@ class GladosEventHandler(AsyncEventHandler):
                 if self._synthesize.text:
                     # Final audio chunk(s)
 
-                    await self._handle_synthesize(self._synthesize)
+                    await self._handle_synthesize(self._synthesize, send_stop=False)
+
+                if self.audio_started:
+                    await self.write_event(AudioStop().event())
+                    self.audio_started = False
+
+                self.is_streaming = False
                 # End of audio
 
                 await self.write_event(SynthesizeStopped().event())
@@ -101,10 +114,17 @@ class GladosEventHandler(AsyncEventHandler):
             )
             raise err
 
-    async def _handle_synthesize(self, synthesize: Synthesize) -> bool:
+    async def _handle_synthesize(
+        self, synthesize: Synthesize, send_stop: bool = True
+    ) -> bool:
         _LOGGER.debug(synthesize)
 
         glados_proc = await self.process_manager.get_process()
+        total_chunks_sent = 0
+        samples_per_chunk = max(
+            1,
+            int(getattr(self.cli_args, "samples_per_chunk", 1024)),
+        )
 
         try:
             # Start processing with run_tts
@@ -112,6 +132,9 @@ class GladosEventHandler(AsyncEventHandler):
             async for pcm, rate, width, channels in glados_proc.run_tts(
                 synthesize.text
             ):
+                if pcm is None:
+                    continue
+
                 # Send AudioStart event if it's not already sent
 
                 if not self.audio_started:
@@ -119,20 +142,38 @@ class GladosEventHandler(AsyncEventHandler):
                         AudioStart(rate=rate, width=width, channels=channels).event()
                     )
                     self.audio_started = True
-                # Send audio chunk as soon as it's generated
 
-                await self.write_event(
-                    AudioChunk(
-                        audio=pcm, rate=rate, width=width, channels=channels
-                    ).event()
-                )
-            _LOGGER.debug(f"Sent AudioChunk event for chunk: {synthesize.text}")
+                # Keep sentence-level synthesis quality, but stream PCM in transport-sized chunks.
+                bytes_per_chunk = max(1, width * channels * samples_per_chunk)
+                for offset in range(0, len(pcm), bytes_per_chunk):
+                    await self.write_event(
+                        AudioChunk(
+                            audio=pcm[offset : offset + bytes_per_chunk],
+                            rate=rate,
+                            width=width,
+                            channels=channels,
+                        ).event()
+                    )
+                    total_chunks_sent += 1
+
+            _LOGGER.debug(
+                "Sent %s AudioChunk events for chunk: %s",
+                total_chunks_sent,
+                synthesize.text,
+            )
         except Exception as e:
-            _LOGGER.error(f"Error during TTS processing: {e}")
+            _LOGGER.error("Error during TTS processing: %s", e)
             await self.write_event(
                 Error(text=str(e), code="TTSProcessingError").event()
             )
-        await self.write_event(AudioStop().event())
+            if self.audio_started:
+                await self.write_event(AudioStop().event())
+                self.audio_started = False
+                _LOGGER.debug("Audio stream reset after synthesis error.")
+
+        if send_stop:
+            await self.write_event(AudioStop().event())
+            self.audio_started = False
         # Stop the audio stream when done
 
         _LOGGER.debug("Completed request")

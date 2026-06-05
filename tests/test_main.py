@@ -1,3 +1,5 @@
+"""Unit tests for the top-level __main__ server entrypoint."""
+
 import asyncio
 import importlib.util
 import logging
@@ -15,6 +17,8 @@ assert MAIN_PATH.exists(), f"Cannot find __main__.py at: {MAIN_PATH}"
 
 # Load module from file
 spec = importlib.util.spec_from_file_location("glados_main", MAIN_PATH)
+assert spec is not None
+assert spec.loader is not None
 mainmod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mainmod)
 
