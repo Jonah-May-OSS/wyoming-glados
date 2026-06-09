@@ -4,9 +4,6 @@
 
 The server part is a heavily stripped down version of [wyoming-piper](https://github.com/rhasspy/wyoming-piper) and the gladostts folder is a [Git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) of R2D2FISH's repo. It also leverages TensorRT for the vocoder model. This conversion happens the first time the server launches and requires roughly 5650 MB of VRAM. Once the .ts model file has been built, only about 575 MB should be used.
 
-TODOS:
-- Fix ARM64 builds so Docker images are created and published
-
 ## Usage
 
 ### Pre-requisites
@@ -14,12 +11,12 @@ TODOS:
 2. Install and configure the [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
 ### Docker Compose (recommended)
-For AMD64 with discrete GPUs:
+For AMD64/ARM64 with discrete GPUs:
 ```yaml
 version: "3"
 services:
   wyoming-glados:
-    image: captnspdr/wyoming-glados:latest-amd64
+    image: captnspdr/wyoming-glados:latest
     container_name: wyoming-glados
     ports:
       - 10201:10201
@@ -38,13 +35,31 @@ services:
               capabilities: [gpu]
 ```
 
+For Jetson devices (iGPU), use the `-igpu` image tag instead:
+```yaml
+version: "3"
+services:
+  wyoming-glados:
+    image: captnspdr/wyoming-glados:latest-igpu
+    container_name: wyoming-glados
+    runtime: nvidia
+    ports:
+      - 10201:10201
+    volumes:
+      - ./models:/usr/src/models:rw
+    environment:
+      - STREAMING=true
+      - DEBUG=false
+    restart: unless-stopped
+```
+
 
 ### Docker (Latest tag on Docker Hub)
 1. Clone this repository
 2. Browse to the repository docker folder
 3. Run the following command based on your platform:
    
-For AMD64 with dGPU:
+For AMD64/ARM64 with dGPU:
 
 ```bash
 docker run \
@@ -55,10 +70,10 @@ docker run \
   -p 10201:10201 \                            # map port 10201 → 10201
   -e DEVICE=cuda \                            # `cuda` or `cpu`
   -e STREAMING=true \                         # Enable partial streaming
-  captnspdr/wyoming-glados:latest-amd64
+  captnspdr/wyoming-glados:latest
 ```
 
-### Docker (Latest GitHub commit, AMD64 with dGPU)
+### Docker (Latest GitHub commit, AMD64/ARM64 with dGPU)
 1. Clone this repository
 2. Browse to the repository docker folder
 3. Run ``docker compose -f docker-compose-github.yaml up -d``

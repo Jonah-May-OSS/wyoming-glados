@@ -92,37 +92,32 @@ jobs:
         with:
           images: captnspdr/wyoming-glados
 
-      - name: Prepare AMD64 Tags
-        id: prepare-amd64-tags
-        run: |
-          TAGS="${{ steps.meta.outputs.tags }}"
-          echo "Original AMD64 TAGS: $TAGS"
-
-          # We'll split by space and append '-amd64' to each
-          AMD64_TAGS=""
-          for T in $TAGS; do
-            AMD64_TAGS="${AMD64_TAGS}\n${T}-amd64"
-          done
-
-          # Clean up any leading blank line
-          AMD64_TAGS="$(echo -e "$AMD64_TAGS" | sed '/^$/d')"
-
-          echo "Final AMD64 tags (multi-line):"
-          echo "$AMD64_TAGS"
-
-          # -- The important part --
-          # Use the '<<EOF' syntax so GitHub Actions treats the entire block as ONE output variable
-          echo "amd64_tags<<EOF" >> $GITHUB_OUTPUT
-          echo "$AMD64_TAGS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Build and Push AMD64 dGPU Image
-        id: push-amd64
+      - name: Build and Push dGPU Image (multi-arch)
+        id: push-dgpu
         uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
         with:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: ${{ steps.prepare-amd64-tags.outputs.amd64_tags }}
-          labels: ${{ steps.meta.outputs.labels }}-amd64
-          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+
+      - name: Extract metadata (tags, labels) for iGPU
+        id: meta-igpu
+        uses: docker/metadata-action@c3b064c6d7c32446d6bc214ea075f1caad2de35a
+        with:
+          images: captnspdr/wyoming-glados
+          flavor: |
+            suffix=-igpu,onlatest=true
+
+      - name: Build and Push iGPU (Jetson) Image
+        id: push-igpu
+        uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
+        with:
+          context: .
+          file: ./docker/Dockerfile.igpu
+          push: true
+          tags: ${{ steps.meta-igpu.outputs.tags }}
+          labels: ${{ steps.meta-igpu.outputs.labels }}
+          platforms: linux/arm64
