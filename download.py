@@ -19,6 +19,7 @@ class ModelFile(TypedDict):
     filename: str
     md5: str | None
 
+
 DEFAULT_URL = (
     "https://github.com/Jonah-May-OSS/glados-tts/releases/download/1.0.0/{file}"
 )
