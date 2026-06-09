@@ -33,6 +33,13 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__main__.py" = ["E402"]  # Module level imports not at top (needed for warning suppression)
 
+[tool.ruff.lint.isort]
+# Pin first-party packages explicitly. Otherwise ruff auto-detects them from the
+# source tree, which is empty for the `gladostts` submodule in the Ruff CI job
+# (it checks out without submodules) — causing ruff to mis-sort gladostts as
+# third-party and fight pylint, which checks out submodules and sees it as first-party.
+known-first-party = ["gladostts", "server"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

@@ -17,11 +17,11 @@ from typing import Any, cast
 
 import nltk
 import torch.nn.modules.transformer as _tfm
-from gladostts.glados import TTSRunner
 from nltk import data as nltk_data
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
+from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 
