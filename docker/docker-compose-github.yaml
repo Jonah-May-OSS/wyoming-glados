@@ -2,7 +2,7 @@ version: "3"
 services:
   wyoming-glados:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     image: wyoming-glados
     container_name: wyoming-glados
