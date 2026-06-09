@@ -80,7 +80,9 @@ def ensure_model_exists(download_dir: Path, base_url: str):
         },
         {
             "filename": "tacotron-trt.ts",
-            "md5": "b0d3d95a30bfecb2904be498767636ff",
+            # Allow locally rebuilt TRT engines to persist across restarts:
+            # download only when absent, otherwise keep the local engine.
+            "md5": None,
         },
         {
             "filename": "en_us_cmudict_ipa_forward.pt",
