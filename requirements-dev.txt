@@ -3,6 +3,6 @@ pytest~=9.0.2
 pytest-asyncio~=1.4.0
 pytest-cov~=7.1.0
 ruff~=0.15.10
-regex~=2026.4.4
+regex~=2026.5.9
 pyright~=1.1.406
 pylint~=3.3.8
