@@ -8,8 +8,16 @@ import hashlib
 import logging
 import shutil
 from pathlib import Path
+from typing import TypedDict
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import urlopen
+
+
+class ModelFile(TypedDict):
+    """A model file to download and its expected MD5 checksum (None to skip)."""
+
+    filename: str
+    md5: str | None
 
 DEFAULT_URL = (
     "https://github.com/Jonah-May-OSS/glados-tts/releases/download/1.0.0/{file}"
@@ -64,7 +72,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
     """Ensure that all required model files are present and valid."""
     # List of model files and their expected MD5 checksums
 
-    model_files = [
+    model_files: list[ModelFile] = [
         {
             "filename": "glados-new.pt",
             "md5": "d6945ffd96ee0619d0d49a581b5b83ad",
