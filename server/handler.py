@@ -278,7 +278,9 @@ class GladosEventHandler(AsyncEventHandler):
             except Exception as err:
                 # Best-effort teardown: suppress unexpected drain errors during
                 # cancellation, but keep diagnostics for debugging.
-                _LOGGER.debug("Ignoring drain task error during cancellation", exc_info=err)
+                _LOGGER.debug(
+                    "Ignoring drain task error during cancellation", exc_info=err
+                )
             self._drain_task = None
         self._sentence_queue = None
 
