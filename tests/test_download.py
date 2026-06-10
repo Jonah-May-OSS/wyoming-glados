@@ -84,8 +84,8 @@ def test_ensure_model_exists_downloads_missing_files(tmp_path):
 
         ensure_model_exists(tmp_path, base_url)
 
-        assert urlopen_mock.call_count == 6
-        assert copy_mock.call_count == 6
+        assert urlopen_mock.call_count == 5
+        assert copy_mock.call_count == 5
 
 
 # ================================================================
@@ -96,7 +96,6 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
 
     model_paths = [
         tmp_path / "glados-new.pt",
-        tmp_path / "tacotron-trt.ts",
         tmp_path / "en_us_cmudict_ipa_forward.pt",
         tmp_path / "emb/glados_p2.pt",
         tmp_path / "vocoder-gpu.pt",
