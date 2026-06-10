@@ -219,6 +219,9 @@ class TestStreamingEvents:
         assert synthesize_state is not None
         assert synthesize_state.text == ""
 
+        # Clean up the background pipeline task.
+        await handler.disconnect()
+
     @pytest.mark.asyncio
     async def test_synthesize_chunk_event(self, handler):
         """Test SynthesizeChunk event with complete sentence."""
@@ -236,8 +239,13 @@ class TestStreamingEvents:
         result = await handler.handle_event(event)
 
         assert result is True
-        # In streaming mode, chunk handling keeps the audio stream open.
-        assert handler.write_event.call_count >= 2  # AudioStart, AudioChunk
+
+        # Audio is written by the background pipeline; SynthesizeStop flushes it.
+        await handler.handle_event(SynthesizeStop().event())
+
+        event_types = [call[0][0].type for call in handler.write_event.call_args_list]
+        assert "audio-start" in event_types
+        assert "audio-chunk" in event_types
 
     @pytest.mark.asyncio
     async def test_synthesize_chunk_event_with_long_clause(self, handler):
@@ -254,7 +262,12 @@ class TestStreamingEvents:
         result = await handler.handle_event(stream_chunk.event())
 
         assert result is True
-        assert handler.write_event.call_count >= 2
+
+        await handler.handle_event(SynthesizeStop().event())
+
+        event_types = [call[0][0].type for call in handler.write_event.call_args_list]
+        assert "audio-start" in event_types
+        assert "audio-chunk" in event_types
 
     @pytest.mark.asyncio
     async def test_synthesize_chunk_incomplete_sentence(self, handler):
@@ -275,6 +288,9 @@ class TestStreamingEvents:
         assert result is True
         # Should not have sent audio (no complete sentence)
         handler.write_event.assert_not_called()
+
+        # Clean up the background pipeline task.
+        await handler.disconnect()
 
     @pytest.mark.asyncio
     async def test_synthesize_stop_event_with_text(self, handler):
@@ -332,6 +348,107 @@ class TestStreamingEvents:
 
         assert result is True
         assert handler.is_streaming is None  # Should not have changed
+
+
+class TestStreamingPipeline:
+    """Test the sentence pipelining behavior of streaming mode."""
+
+    @pytest.mark.asyncio
+    async def test_sentences_stream_in_order(self, handler):
+        """Audio for multiple sentences must be written in sentence order."""
+        synthesized: list[str] = []
+
+        def make_run_tts(text, *_args, **_kwargs):
+            async def gen():
+                synthesized.append(text)
+                yield f"pcm:{text}".encode(), 22050, 2, 1
+
+            return gen()
+
+        mock_process = MagicMock(spec=GladosProcess)
+        mock_process.run_tts = make_run_tts
+        handler.process_manager.get_process = AsyncMock(return_value=mock_process)
+
+        await handler.handle_event(SynthesizeStart(voice=None).event())
+        await handler.handle_event(
+            SynthesizeChunk(text="First sentence. Second sentence. Trailing").event()
+        )
+        await handler.handle_event(SynthesizeStop().event())
+
+        assert synthesized == [
+            "First sentence.",
+            "Second sentence.",
+            "Trailing",
+        ]
+
+        audio_chunks = [
+            call[0][0].payload
+            for call in handler.write_event.call_args_list
+            if call[0][0].type == "audio-chunk"
+        ]
+        assert audio_chunks == [
+            b"pcm:First sentence.",
+            b"pcm:Second sentence.",
+            b"pcm:Trailing",
+        ]
+
+        # Stream must terminate cleanly: AudioStop before SynthesizeStopped.
+        event_types = [call[0][0].type for call in handler.write_event.call_args_list]
+        assert event_types[-2:] == ["audio-stop", "synthesize-stopped"]
+
+    @pytest.mark.asyncio
+    async def test_sentence_error_keeps_stream_alive(self, handler):
+        """A failing sentence sends Error but later sentences still play."""
+
+        def make_run_tts(text, *_args, **_kwargs):
+            async def gen():
+                if "bad" in text:
+                    raise RuntimeError("TTS failed")
+                yield f"pcm:{text}".encode(), 22050, 2, 1
+
+            return gen()
+
+        mock_process = MagicMock(spec=GladosProcess)
+        mock_process.run_tts = make_run_tts
+        handler.process_manager.get_process = AsyncMock(return_value=mock_process)
+
+        await handler.handle_event(SynthesizeStart(voice=None).event())
+        await handler.handle_event(
+            SynthesizeChunk(text="This one is bad. This one is fine. Next").event()
+        )
+        await handler.handle_event(SynthesizeStop().event())
+
+        event_types = [call[0][0].type for call in handler.write_event.call_args_list]
+        assert "error" in event_types
+        assert "audio-chunk" in event_types
+        assert event_types[-1] == "synthesize-stopped"
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_pipeline(self, handler):
+        """Disconnecting mid-stream cancels the drain task."""
+        await handler.handle_event(SynthesizeStart(voice=None).event())
+        drain_task = _private_attr(handler, "_drain_task")
+        assert drain_task is not None
+
+        await handler.disconnect()
+
+        assert drain_task.done()
+        assert _private_attr(handler, "_drain_task") is None
+        assert _private_attr(handler, "_sentence_queue") is None
+
+    @pytest.mark.asyncio
+    async def test_restart_stream_resets_pipeline(self, handler):
+        """A second SynthesizeStart replaces the previous pipeline."""
+        await handler.handle_event(SynthesizeStart(voice=None).event())
+        first_drain = _private_attr(handler, "_drain_task")
+
+        await handler.handle_event(SynthesizeStart(voice=None).event())
+        second_drain = _private_attr(handler, "_drain_task")
+
+        assert first_drain is not second_drain
+        assert first_drain.done()
+
+        await handler.disconnect()
 
 
 class TestHandleSynthesize:

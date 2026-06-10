@@ -78,12 +78,9 @@ def ensure_model_exists(download_dir: Path, base_url: str):
             "filename": "glados-new.pt",
             "md5": "d6945ffd96ee0619d0d49a581b5b83ad",
         },
-        {
-            "filename": "tacotron-trt.ts",
-            # Allow locally rebuilt TRT engines to persist across restarts:
-            # download only when absent, otherwise keep the local engine.
-            "md5": None,
-        },
+        # NOTE: tacotron-trt.ts is intentionally not downloaded anymore. The
+        # released file is a mislabeled copy of glados-new.pt (Tacotron never
+        # actually ran through TensorRT); TTSRunner deletes local copies.
         {
             "filename": "en_us_cmudict_ipa_forward.pt",
             "md5": "33887f7f579f010ce4463534306120b0",
