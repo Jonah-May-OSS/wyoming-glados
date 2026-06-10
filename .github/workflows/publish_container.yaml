@@ -96,7 +96,7 @@ jobs:
         id: push-dgpu
         uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
         with:
-          context: .
+          context: ./docker
           file: ./docker/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -115,7 +115,7 @@ jobs:
         id: push-igpu
         uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
         with:
-          context: .
+          context: ./docker
           file: ./docker/Dockerfile.igpu
           push: true
           tags: ${{ steps.meta-igpu.outputs.tags }}
