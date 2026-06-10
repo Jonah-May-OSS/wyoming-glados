@@ -273,6 +273,7 @@ class GladosEventHandler(AsyncEventHandler):
             try:
                 await self._drain_task
             except asyncio.CancelledError:
+                # Expected when awaiting a task that we explicitly cancelled.
                 pass
             except Exception:
                 pass
