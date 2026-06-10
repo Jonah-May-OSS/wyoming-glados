@@ -35,14 +35,8 @@ class TestGladosProcessLogic:
         """Test normal TTS flow."""
         mock_runner = MagicMock()
 
-        mock_audio = MagicMock()
-        mock_audio.raw_data = b"audio_data"
-        mock_audio.frame_rate = 22050
-        mock_audio.sample_width = 2
-        mock_audio.channels = 1
-
-        run_tts_mock = MagicMock(return_value=mock_audio)
-        mock_runner.run_tts = run_tts_mock
+        run_tts_stream_mock = MagicMock(return_value=iter([b"audio_data"]))
+        mock_runner.run_tts_stream = run_tts_stream_mock
 
         p = GladosProcess("default", mock_runner)
 
@@ -51,12 +45,28 @@ class TestGladosProcessLogic:
             results.append(chunk)
 
         assert len(results) == 1
-        raw, rate, _, _ = results[0]
+        raw, rate, width, channels = results[0]
         assert raw == b"audio_data"
         assert rate == 22050
-        assert run_tts_mock.call_count == 1
-        assert run_tts_mock.call_args is not None
-        assert run_tts_mock.call_args.args == ("Test text", 1.0)
+        assert width == 2
+        assert channels == 1
+        assert run_tts_stream_mock.call_count == 1
+        assert run_tts_stream_mock.call_args is not None
+        assert run_tts_stream_mock.call_args.args == ("Test text", 1.0)
+
+    @pytest.mark.asyncio
+    async def test_tts_streams_multiple_chunks(self):
+        """PCM chunks are forwarded individually as the model produces them."""
+        mock_runner = MagicMock()
+        mock_runner.run_tts_stream = MagicMock(
+            return_value=iter([b"chunk1", b"chunk2", b"chunk3"])
+        )
+
+        p = GladosProcess("default", mock_runner)
+
+        results = [chunk async for chunk, _, _, _ in p.run_tts("Test text")]
+
+        assert results == [b"chunk1", b"chunk2", b"chunk3"]
 
     @pytest.mark.asyncio
     async def test_async_generator_pattern(self):
@@ -78,13 +88,33 @@ class TestGladosProcessLogic:
     async def test_run_tts_exception_path(self):
         """Ensure exception inside run_tts is yielded and re-raised."""
         mock_runner = MagicMock()
-        mock_runner.run_tts.side_effect = RuntimeError("boom")
+        mock_runner.run_tts_stream.side_effect = RuntimeError("boom")
 
         p = GladosProcess("voice", mock_runner)
 
         with pytest.raises(RuntimeError):
             async for _ in p.run_tts("text"):
                 pass
+
+    @pytest.mark.asyncio
+    async def test_run_tts_exception_midstream(self):
+        """An exception after some chunks still yields the earlier chunks."""
+
+        def stream(*_args, **_kwargs):
+            yield b"chunk1"
+            raise RuntimeError("boom")
+
+        mock_runner = MagicMock()
+        mock_runner.run_tts_stream = stream
+
+        p = GladosProcess("voice", mock_runner)
+
+        results = []
+        with pytest.raises(RuntimeError):
+            async for chunk, _, _, _ in p.run_tts("text"):
+                results.append(chunk)
+
+        assert results == [b"chunk1"]
 
 
 # ---------------------------------------------------------------------------

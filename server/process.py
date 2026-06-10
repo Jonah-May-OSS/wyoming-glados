@@ -10,6 +10,16 @@ from gladostts.glados import TTSRunner  # Import your TTSRunner from glados.py
 
 _LOGGER = logging.getLogger(__name__)
 
+# Audio format produced by the GLaDOS vocoder (22050 Hz, 16-bit mono).
+
+SAMPLE_RATE = 22050
+SAMPLE_WIDTH = 2
+CHANNELS = 1
+
+# Sentinel marking the end of a PCM stream.
+
+_stream_end = object()
+
 
 class GladosProcess:
     """Info for a running GLaDOS process (one TTS instance)."""
@@ -26,18 +36,35 @@ class GladosProcess:
     async def run_tts(
         self, text: str, alpha: float = 1.0
     ) -> AsyncGenerator[tuple[bytes | None, int, int, int], None]:
-        """Process the text and handle TTS output."""
+        """Process the text, yielding PCM chunks as the model produces them.
+
+        Inference runs in a worker thread so the event loop stays responsive;
+        each PCM chunk is forwarded here as soon as the vocoder emits it, so
+        playback can start before the utterance is fully synthesized.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+
+        def produce() -> None:
+            stream = self.runner.run_tts_stream(text, alpha)
+            try:
+                for pcm in stream:
+                    loop.call_soon_threadsafe(queue.put_nowait, pcm)
+            finally:
+                close = getattr(stream, "close", None)
+                if close is not None:
+                    close()
+
         try:
-            # Offload synchronous model inference so concurrent clients don't block the loop.
-            audio_segment: Any = await asyncio.to_thread(
-                self.runner.run_tts, text, alpha
-            )
-            yield (
-                audio_segment.raw_data,
-                audio_segment.frame_rate,
-                audio_segment.sample_width,
-                audio_segment.channels,
-            )
+            future = loop.run_in_executor(None, produce)
+            future.add_done_callback(lambda _: queue.put_nowait(_stream_end))
+            while True:
+                item = await queue.get()
+                if item is _stream_end:
+                    break
+                yield (item, SAMPLE_RATE, SAMPLE_WIDTH, CHANNELS)
+            # Surface any inference error raised in the worker thread.
+            await future
         except Exception as e:
             _LOGGER.error(
                 "TTS processing failed for text: %s... Error: %s", text[:50], e
