@@ -37,11 +37,11 @@ VOICES: list[VoiceSpec] = [
 ]
 
 # Lookup by exact voice name (lower-cased).
-_VOICE_TO_PHON: dict[str, str | None] = {v.name.lower(): v.phonemizer_lang for v in VOICES}
+_voice_to_phon: dict[str, str | None] = {v.name.lower(): v.phonemizer_lang for v in VOICES}
 
 # Fallback lookup by bare language code, for clients that send a language
 # instead of a voice name. en -> None keeps the English default path.
-_LANG_TO_PHON: dict[str, str | None] = {
+_lang_to_phon: dict[str, str | None] = {
     "en": None,
     "de": "de",
     "fr": "fr",
@@ -64,9 +64,9 @@ def resolve_phonemizer_lang(voice: object | None) -> str | None:
     if not key:
         return None
 
-    if key in _VOICE_TO_PHON:
-        return _VOICE_TO_PHON[key]
+    if key in _voice_to_phon:
+        return _voice_to_phon[key]
 
     # Accept bare/region-tagged language codes too (e.g. "de", "de-DE").
     short = key.replace("_", "-").split("-")[0]
-    return _LANG_TO_PHON.get(short)
+    return _lang_to_phon.get(short)
