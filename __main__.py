@@ -23,6 +23,7 @@ from wyoming.server import AsyncServer
 
 from gladostts.glados import TTSRunner
 from server.handler import GladosEventHandler
+from server.languages import VOICES
 from server.process import GladosProcessManager
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -144,13 +145,14 @@ async def main() -> None:
     )
     voices = [
         TtsVoice(
-            name="default",
-            description="Default GLaDOS voice",
+            name=spec.name,
+            description=spec.description,
             attribution=voice_attribution,
             installed=True,
-            languages=["en"],
+            languages=[spec.wyoming_lang],
             version="2",
         )
+        for spec in VOICES
     ]
 
     # Define TTS program information (streaming support enabled)

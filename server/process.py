@@ -34,19 +34,21 @@ class GladosProcess:
         return False  # Assuming GLaDOS doesn't support multiple speakers in this case
 
     async def run_tts(
-        self, text: str, alpha: float = 1.0
+        self, text: str, alpha: float = 1.0, lang: str | None = None
     ) -> AsyncGenerator[tuple[bytes | None, int, int, int], None]:
         """Process the text, yielding PCM chunks as the model produces them.
 
         Inference runs in a worker thread so the event loop stays responsive;
         each PCM chunk is forwarded here as soon as the vocoder emits it, so
         playback can start before the utterance is fully synthesized.
+
+        ``lang`` selects the phonemizer language (None = English default).
         """
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[Any] = asyncio.Queue()
 
         def produce() -> None:
-            stream = self.runner.run_tts_stream(text, alpha)
+            stream = self.runner.run_tts_stream(text, alpha, lang=lang)
             try:
                 for pcm in stream:
                     loop.call_soon_threadsafe(queue.put_nowait, pcm)

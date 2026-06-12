@@ -18,6 +18,7 @@ from wyoming.tts import (
     SynthesizeStopped,
 )
 
+from .languages import resolve_phonemizer_lang
 from .process import GladosProcessManager
 from .sentence_boundary import SentenceBoundaryDetector, remove_asterisks
 
@@ -45,6 +46,8 @@ class GladosEventHandler(AsyncEventHandler):
         )  # Initialize the sentence boundary detector
         self.is_streaming: bool | None = None
         self._synthesize: Synthesize | None = None
+        # Phonemizer language for the in-progress text stream (None = English).
+        self._lang: str | None = None
 
         self.audio_started = False
 
@@ -79,9 +82,14 @@ class GladosEventHandler(AsyncEventHandler):
                 self.is_streaming = True
                 self.sbd = SentenceBoundaryDetector()
                 self._synthesize = Synthesize(text="", voice=stream_start.voice)
+                self._lang = resolve_phonemizer_lang(stream_start.voice)
                 self.audio_started = False
                 await self._start_pipeline()
-                _LOGGER.debug("Text stream started: voice=%s", stream_start.voice)
+                _LOGGER.debug(
+                    "Text stream started: voice=%s lang=%s",
+                    stream_start.voice,
+                    self._lang,
+                )
                 return True
             if SynthesizeChunk.is_type(event.type):
                 assert self._synthesize is not None
@@ -165,13 +173,14 @@ class GladosEventHandler(AsyncEventHandler):
         _LOGGER.debug(synthesize)
 
         glados_proc = await self.process_manager.get_process()
+        lang = resolve_phonemizer_lang(synthesize.voice)
         total_chunks_sent = 0
 
         try:
             # Start processing with run_tts
 
             async for pcm, rate, width, channels in glados_proc.run_tts(
-                synthesize.text
+                synthesize.text, lang=lang
             ):
                 if pcm is None:
                     continue
@@ -223,7 +232,7 @@ class GladosEventHandler(AsyncEventHandler):
         """
         try:
             glados_proc = await self.process_manager.get_process()
-            async for chunk in glados_proc.run_tts(text):
+            async for chunk in glados_proc.run_tts(text, lang=self._lang):
                 await pcm_queue.put(chunk)
             await pcm_queue.put(None)
         except Exception as err:

@@ -84,8 +84,8 @@ def test_ensure_model_exists_downloads_missing_files(tmp_path):
 
         ensure_model_exists(tmp_path, base_url)
 
-        assert urlopen_mock.call_count == 5
-        assert copy_mock.call_count == 5
+        assert urlopen_mock.call_count == 6
+        assert copy_mock.call_count == 6
 
 
 # ================================================================

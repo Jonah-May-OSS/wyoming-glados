@@ -8,16 +8,21 @@ import hashlib
 import logging
 import shutil
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import urlopen
 
 
 class ModelFile(TypedDict):
-    """A model file to download and its expected MD5 checksum (None to skip)."""
+    """A model file to download and its expected MD5 checksum (None to skip).
+
+    ``url`` is an optional absolute URL override for files not hosted on the
+    default release (e.g. the multilingual phonemizer on DeepPhonemizer's S3).
+    """
 
     filename: str
     md5: str | None
+    url: NotRequired[str]
 
 
 DEFAULT_URL = (
@@ -85,6 +90,17 @@ def ensure_model_exists(download_dir: Path, base_url: str):
             "filename": "en_us_cmudict_ipa_forward.pt",
             "md5": "33887f7f579f010ce4463534306120b0",
         },
+        # Multilingual "Latin IPA" phonemizer (en_us, en_uk, de, fr, es) used
+        # for non-English voices. Hosted on DeepPhonemizer's public S3 bucket,
+        # so it needs an absolute URL override. md5 is not pinned upstream.
+        {
+            "filename": "latin_ipa_forward.pt",
+            "md5": None,
+            "url": (
+                "https://public-asai-dl-models.s3.eu-central-1.amazonaws.com/"
+                "DeepPhonemizer/latin_ipa_forward.pt"
+            ),
+        },
         {
             "filename": "emb/glados_p2.pt",
             "md5": "ff2ad1438e9acb1f8e8607864c239ffc",
@@ -117,7 +133,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
 
         try:
             filename = model_file.rsplit("/", maxsplit=1)[-1]
-            model_url = base_url.format(file=filename)
+            model_url = model.get("url") or base_url.format(file=filename)
             _LOGGER.info("Downloading %s to %s", model_url, model_file_path)
             with (
                 urlopen(_quote_url(model_url)) as response,
