@@ -25,11 +25,15 @@ class VoiceSpec(NamedTuple):
 
 
 # Order matters only for display; "default" stays first for back-compat.
+# wyoming_lang uses underscore locale codes (en_US, de_DE, ...) to match the
+# Piper convention Home Assistant is built against: the HA Wyoming integration
+# does no language-code normalization and exposes voice.languages verbatim as
+# the TTS entity's supported_languages, so these must match HA's pipeline codes.
 VOICES: list[VoiceSpec] = [
-    VoiceSpec("default", "Default GLaDOS voice (English)", "en", None),
-    VoiceSpec("glados-de", "GLaDOS voice reading German", "de", "de"),
-    VoiceSpec("glados-fr", "GLaDOS voice reading French", "fr", "fr"),
-    VoiceSpec("glados-es", "GLaDOS voice reading Spanish", "es", "es"),
+    VoiceSpec("default", "Default GLaDOS voice (English)", "en_US", None),
+    VoiceSpec("glados-de", "GLaDOS voice reading German", "de_DE", "de"),
+    VoiceSpec("glados-fr", "GLaDOS voice reading French", "fr_FR", "fr"),
+    VoiceSpec("glados-es", "GLaDOS voice reading Spanish", "es_ES", "es"),
 ]
 
 # Lookup by exact voice name (lower-cased).
