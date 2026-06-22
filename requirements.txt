@@ -10,6 +10,6 @@ scipy~=1.18.0
 torch==2.12.1
 torch-tensorrt==2.12.1
 torchvision==0.27.1
-tqdm~=4.68.2
+tqdm~=4.68.3
 Unidecode~=1.4.0
 audioop-lts~=0.2.2; python_version>='3.13'
