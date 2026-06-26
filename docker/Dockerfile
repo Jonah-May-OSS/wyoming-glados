@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/tensorrt:26.05-py3
+FROM nvcr.io/nvidia/tensorrt:26.06-py3
 
 WORKDIR /usr/src
 
