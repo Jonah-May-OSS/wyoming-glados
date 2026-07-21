@@ -91,11 +91,17 @@ class SentenceBoundaryDetector:
 
     @staticmethod
     def _is_decimal(candidate: str, trailing: str) -> bool:
+        """A digit before the period means a decimal, or that we cannot tell yet.
+
+        While streaming, the fractional digits may not have arrived; treat a
+        trailing "3." as a decimal so the segment stays buffered until the next
+        chunk decides it.
+        """
         stripped_candidate = candidate.rstrip()
-        return bool(
-            re.search(r"\d\.$", stripped_candidate)
-            and re.match(r"\d", trailing.lstrip())
-        )
+        if not re.search(r"\d\.$", stripped_candidate):
+            return False
+        rest = trailing.lstrip()
+        return not rest or bool(re.match(r"\d", rest))
 
 
 def remove_asterisks(text: str) -> str:
