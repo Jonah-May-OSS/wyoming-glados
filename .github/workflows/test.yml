@@ -82,16 +82,32 @@ jobs:
           use-github-cache: true
           use-local-cache: true
       
+      # The server defaults --models-dir to $MODELS_DIR (falling back to the
+      # container path /usr/src/models, which isn't writable on a self-hosted
+      # runner). Point it at the persistent NFS cache when available so the
+      # model download is reused across runs; otherwise a writable local dir.
+      - name: Configure models dir
+        run: |
+          if [ -n "$RUNNER_CACHE" ]; then
+            MODELS_DIR="$RUNNER_CACHE/glados/models"
+          else
+            MODELS_DIR="$PWD/gladostts/models"
+          fi
+          mkdir -p "$MODELS_DIR"
+          echo "MODELS_DIR=$MODELS_DIR" >> "$GITHUB_ENV"
+          echo "Using MODELS_DIR=$MODELS_DIR"
+
       - name: Setup Virtual Environment
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
-          python3 download.py
+          python3 download.py --model-dir "$MODELS_DIR"
           pip install -r requirements.txt
 
       - name: Start GLaDOS TTS Server and Test Listening
         run: |
           source .venv/bin/activate
+          # __main__.py reads MODELS_DIR from the environment for --models-dir.
           nohup python3 __main__.py --uri 'tcp://0.0.0.0:10201' --debug --streaming > server.log 2>&1 &
           SERVER_PID=$!
           echo "Started GLaDOS TTS server with PID $SERVER_PID"
