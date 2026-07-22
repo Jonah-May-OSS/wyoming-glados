@@ -64,27 +64,23 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install GCC and G++
-        run: |
-          sudo apt update
-          sudo apt install -y gcc g++
+      # gcc/g++, netcat-openbsd and virtualenv are baked into the custom runner
+      # image (local/gpu-runner), so no in-job apt/pip installs are needed.
 
-      - name: Install Netcat
-        run: sudo apt-get install -y netcat-openbsd
-
+      # RUNNER_TOOL_CACHE points at the persistent NFS cache, so 3.13 is
+      # downloaded once and restored instantly after.
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
-      - name: Install Python Virtual Environment Package
-        run: pip install virtualenv
-
-      # GPU driver is provided by the self-hosted runner's nvidia runtime; cache the toolkit.
+      # GPU driver comes from the runner's nvidia runtime; the toolkit installer
+      # is cached in both GitHub cache and the persistent runner tool cache.
       - name: Install CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
           use-github-cache: true
+          use-local-cache: true
       
       - name: Setup Virtual Environment
         run: |
