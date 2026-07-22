@@ -64,44 +64,50 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install GCC and G++
-        run: |
-          sudo apt update
-          sudo apt install -y gcc g++
+      # gcc/g++, netcat-openbsd and virtualenv are baked into the custom runner
+      # image (local/gpu-runner), so no in-job apt/pip installs are needed.
 
-      - name: Install Netcat
-        run: sudo apt-get install -y netcat-openbsd
-
+      # RUNNER_TOOL_CACHE points at the persistent NFS cache, so 3.13 is
+      # downloaded once and restored instantly after.
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
-      - name: Install Python Virtual Environment Package
-        run: pip install virtualenv
-
-      - name: Install Nvidia Drivers
-        run: |
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
-          sudo apt-get update
-          sudo apt-get install -y nvidia-open
-
+      # GPU driver comes from the runner's nvidia runtime; the toolkit installer
+      # is cached in both GitHub cache and the persistent runner tool cache.
       - name: Install CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          use-github-cache: false
+          use-github-cache: true
+          use-local-cache: true
       
+      # The server defaults --models-dir to $MODELS_DIR (falling back to the
+      # container path /usr/src/models, which isn't writable on a self-hosted
+      # runner). Point it at the persistent NFS cache when available so the
+      # model download is reused across runs; otherwise a writable local dir.
+      - name: Configure models dir
+        run: |
+          if [ -n "$RUNNER_CACHE" ]; then
+            MODELS_DIR="$RUNNER_CACHE/glados/models"
+          else
+            MODELS_DIR="$PWD/gladostts/models"
+          fi
+          mkdir -p "$MODELS_DIR"
+          echo "MODELS_DIR=$MODELS_DIR" >> "$GITHUB_ENV"
+          echo "Using MODELS_DIR=$MODELS_DIR"
+
       - name: Setup Virtual Environment
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
-          python3 download.py
+          python3 download.py --model-dir "$MODELS_DIR"
           pip install -r requirements.txt
 
       - name: Start GLaDOS TTS Server and Test Listening
         run: |
           source .venv/bin/activate
+          # __main__.py reads MODELS_DIR from the environment for --models-dir.
           nohup python3 __main__.py --uri 'tcp://0.0.0.0:10201' --debug --streaming > server.log 2>&1 &
           SERVER_PID=$!
           echo "Started GLaDOS TTS server with PID $SERVER_PID"
@@ -146,16 +152,3 @@ jobs:
         with:
           name: server-logs
           path: server.log
-
-      - name: CUDA Driver/Library Mismatch Auto-Fix
-        if: ${{ failure() }}
-        run: |
-          echo "Scanning server.log for NVML initialization failure..."
-          if grep -Fq "Failed to initialize NVML: Driver/library version mismatch" server.log; then
-            echo "CUDA driver/library mismatch detected—upgrading system and rebooting."
-            sudo apt update
-            sudo apt upgrade -y
-            sudo reboot
-          else
-            echo "No NVML mismatch found; skipping auto-fix."
-          fi
