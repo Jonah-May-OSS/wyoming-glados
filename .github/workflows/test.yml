@@ -74,14 +74,12 @@ jobs:
         with:
           python-version: '3.13'
 
-      # GPU driver comes from the runner's nvidia runtime; the toolkit installer
-      # is cached in both GitHub cache and the persistent runner tool cache.
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          use-github-cache: true
-          use-local-cache: true
-      
+      # No CUDA toolkit install: every dependency is a prebuilt wheel (torch,
+      # torch-tensorrt, torchvision, scipy, ...) with no source compilation, so
+      # nvcc isn't needed. CUDA runtime comes from the wheels + the self-hosted
+      # runner's nvidia runtime. Installing the toolkit per run wrote ~4GB to
+      # local disk and contributed to a cluster etcd incident.
+
       # The server defaults --models-dir to $MODELS_DIR (falling back to the
       # container path /usr/src/models, which isn't writable on a self-hosted
       # runner). Point it at the persistent NFS cache when available so the
