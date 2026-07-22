@@ -70,7 +70,7 @@ jobs:
       # RUNNER_TOOL_CACHE points at the persistent NFS cache, so 3.13 is
       # downloaded once and restored instantly after.
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
