@@ -15,9 +15,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
-import nltk
 import torch.nn.modules.transformer as _tfm
-from nltk import data as nltk_data
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
@@ -187,14 +185,6 @@ async def main() -> None:
         logger.debug("Flattened RNN weights for best cuDNN performance.")
     except (AttributeError, RuntimeError):
         logger.debug("No .rnn to flatten (or already contiguous).")
-    # Ensure NLTK 'punkt' data is downloaded
-
-    try:
-        nltk_data.find("tokenizers/punkt_tab")
-        logger.debug("NLTK 'punkt' tokenizer data is already available.")
-    except LookupError:
-        logger.debug("Downloading NLTK 'punkt' tokenizer data...")
-        nltk.download("punkt_tab", quiet=not args.debug)
     # Create the GladosProcessManager instance
 
     process_manager = GladosProcessManager(glados_tts)
