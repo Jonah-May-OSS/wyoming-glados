@@ -2,7 +2,8 @@ FROM nvcr.io/nvidia/tensorrt:26.02-py3-igpu
 
 WORKDIR /usr/src
 
-RUN apt-get update && \
+RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99network-resilience && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
         python3 \
