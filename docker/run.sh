@@ -6,7 +6,9 @@ cd /usr/src/wyoming-glados || { echo "Unable to cd into /usr/src/wyoming-glados"
 
 STREAMING=${STREAMING:-true}
 DEBUG=${DEBUG:-false}
-MODEL_DIR=${MODEL_DIR:-"/usr/src/models"}
+# download.py places models in gladostts/models; default MODEL_DIR must match
+# (the old /usr/src/models default pointed at an empty dir on a fresh build).
+MODEL_DIR=${MODEL_DIR:-"/usr/src/wyoming-glados/gladostts/models"}
 
 # Initialize empty flags
 STREAMING_FLAG=""
