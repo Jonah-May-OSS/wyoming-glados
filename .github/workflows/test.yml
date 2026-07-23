@@ -19,39 +19,32 @@ jobs:
     name: "Wait for required checks"
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for Ruff checks
-        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be
-        id: wait-ruff
+      # wait-on-check-action-ts self-fails if a check's conclusion is not in
+      # allowed-conclusions (default success,skipped), so no separate "fail if"
+      # gate step is needed.
+      - name: Wait for Ruff check
+        uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: ruff
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          timeoutSeconds: 600
-          intervalSeconds: 10
+          check-name: ruff
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
 
-      - name: Wait for Pylint checks
-        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be
-        id: wait-pylint
+      - name: Wait for Pylint check
+        uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: pylint
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          timeoutSeconds: 600
-          intervalSeconds: 10
+          check-name: pylint
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
 
-      - name: Wait for Pyright checks
-        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be
-        id: wait-pyright
+      - name: Wait for Pyright check
+        uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: pyright
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          timeoutSeconds: 600
-          intervalSeconds: 10
-
-      - name: Fail if checks did not succeed
-        if: steps.wait-ruff.outputs.conclusion != 'success' || steps.wait-pylint.outputs.conclusion != 'success' || steps.wait-pyright.outputs.conclusion != 'success'
-        run: exit 1
+          check-name: pyright
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
 
   test_linux:
     needs: wait_for_checks
@@ -74,14 +67,12 @@ jobs:
         with:
           python-version: '3.13'
 
-      # GPU driver comes from the runner's nvidia runtime; the toolkit installer
-      # is cached in both GitHub cache and the persistent runner tool cache.
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          use-github-cache: true
-          use-local-cache: true
-      
+      # No CUDA toolkit install: every dependency is a prebuilt wheel (torch,
+      # torch-tensorrt, torchvision, scipy, ...) with no source compilation, so
+      # nvcc isn't needed. CUDA runtime comes from the wheels + the self-hosted
+      # runner's nvidia runtime. Installing the toolkit per run wrote ~4GB to
+      # local disk and contributed to a cluster etcd incident.
+
       # The server defaults --models-dir to $MODELS_DIR (falling back to the
       # container path /usr/src/models, which isn't writable on a self-hosted
       # runner). Point it at the persistent NFS cache when available so the
