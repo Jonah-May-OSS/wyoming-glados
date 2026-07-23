@@ -202,7 +202,6 @@ async def test_main_server_run_exception(monkeypatch, capsys):
     mock_tts = MagicMock()
     monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
 
-
     # Mock process manager
     mock_proc_mgr = MagicMock()
     mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
