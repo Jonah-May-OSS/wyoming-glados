@@ -8,11 +8,10 @@
   "packageRules": [
     {
       "groupName": "PyTorch",
+      "description": "Group the coupled torch ecosystem into one PR (torch and torch-tensorrt must move together). Match by package name; matchSourceUrls relied on PyPI source metadata and split them into separate PRs.",
       "automerge": true,
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
-      "matchSourceUrls": [
-        "https://github.com/pytorch/**"
-      ]
+      "matchPackageNames": ["torch", "torch-tensorrt", "torchvision", "torchaudio"]
     },
     {
       "automerge": true,
