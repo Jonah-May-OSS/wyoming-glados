@@ -88,10 +88,6 @@ async def test_main_happy_path(monkeypatch):
     mock_tts.glados.rnn.flatten_parameters = MagicMock()
 
     # -----------------------------------
-    # Mock NLTK lookup + download
-    # -----------------------------------
-    monkeypatch.setattr(mainmod.nltk_data, "find", MagicMock())
-    monkeypatch.setattr(mainmod.nltk, "download", MagicMock())
 
     # -----------------------------------
     # Mock GladosProcessManager
@@ -138,8 +134,6 @@ async def test_main_download_failure(monkeypatch, capsys):
 
     # Mock the minimum objects needed for main() to proceed
     monkeypatch.setattr(mainmod, "TTSRunner", MagicMock())
-    monkeypatch.setattr(mainmod.nltk_data, "find", MagicMock())
-    monkeypatch.setattr(mainmod.nltk, "download", MagicMock())
 
     mock_proc_mgr = MagicMock()
     mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
@@ -177,8 +171,6 @@ async def test_main_rnn_flatten_failure(monkeypatch):
     monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
 
     # Other required mocks
-    monkeypatch.setattr(mainmod.nltk_data, "find", MagicMock())
-    monkeypatch.setattr(mainmod.nltk, "download", MagicMock())
 
     mock_proc_mgr = MagicMock()
     mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
@@ -197,41 +189,6 @@ async def test_main_rnn_flatten_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_main_downloads_nltk_if_missing(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog"])
-
-    # Mock subprocess
-    monkeypatch.setattr(mainmod.subprocess, "run", MagicMock())
-
-    # Mock TTS
-    mock_tts = MagicMock()
-    monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
-
-    # Force NLTK lookup failure
-    monkeypatch.setattr(mainmod.nltk_data, "find", MagicMock(side_effect=LookupError()))
-    mock_download = MagicMock()
-    monkeypatch.setattr(mainmod.nltk, "download", mock_download)
-
-    # Process manager mocks
-    mock_proc_mgr = MagicMock()
-    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
-    monkeypatch.setattr(
-        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
-    )
-
-    # Server mock
-    mock_server = MagicMock()
-    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
-    monkeypatch.setattr(
-        mainmod.AsyncServer, "from_uri", MagicMock(return_value=mock_server)
-    )
-
-    await mainmod.main()
-
-    mock_download.assert_called_once()
-
-
-@pytest.mark.asyncio
 async def test_main_server_run_exception(monkeypatch, capsys):
     """Ensure exception inside server.run() triggers error log and sys.exit(1)."""
 
@@ -244,10 +201,6 @@ async def test_main_server_run_exception(monkeypatch, capsys):
     # Mock TTSRunner
     mock_tts = MagicMock()
     monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
-
-    # NLTK mocks
-    monkeypatch.setattr(mainmod.nltk_data, "find", MagicMock())
-    monkeypatch.setattr(mainmod.nltk, "download", MagicMock())
 
     # Mock process manager
     mock_proc_mgr = MagicMock()
