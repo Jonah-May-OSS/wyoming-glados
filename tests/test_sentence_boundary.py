@@ -138,3 +138,22 @@ class TestSentenceBoundaryDetector:
             "Pi is 3.14 and rising."
         ]
         assert d.finish() == ""
+
+    def test_decimal_split_across_chunks_does_not_split(self):
+        d = SentenceBoundaryDetector()
+
+        assert not list(d.add_chunk("Your reaction time was 0."))
+        assert list(d.add_chunk("4 seconds slower. ")) == [
+            "Your reaction time was 0.4 seconds slower."
+        ]
+        assert d.finish() == ""
+
+    def test_sentence_ending_in_digit_flushes_on_next_chunk(self):
+        d = SentenceBoundaryDetector()
+
+        assert not list(d.add_chunk("It landed in 1969."))
+        assert list(d.add_chunk(" Then we left.")) == [
+            "It landed in 1969.",
+            "Then we left.",
+        ]
+        assert d.finish() == ""
