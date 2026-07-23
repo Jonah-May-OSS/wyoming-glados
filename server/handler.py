@@ -54,6 +54,9 @@ class GladosEventHandler(AsyncEventHandler):
         # sentence order; _drain_task writes their audio to the client.
         self._sentence_queue: asyncio.Queue[Any] | None = None
         self._drain_task: asyncio.Task[None] | None = None
+        # Track in-flight synthesis (pump) tasks so cancellation can stop them;
+        # otherwise a client disconnect leaves them running on the GPU.
+        self._pump_tasks: set[asyncio.Task[None]] = set()
 
     async def handle_event(self, event: Event) -> bool:
         if Describe.is_type(event.type):
@@ -186,7 +189,11 @@ class GladosEventHandler(AsyncEventHandler):
         except Exception as e:
             await self._report_tts_error(e)
 
-        if send_stop:
+        # Only close a stream that was actually opened. _report_tts_error
+        # already emits AudioStop on error (clearing audio_started), so this
+        # avoids a duplicate stop, and avoids a stray AudioStop when synthesis
+        # produced no audio (no preceding AudioStart).
+        if send_stop and self.audio_started:
             await self.write_event(AudioStop().event())
             self.audio_started = False
         # Stop the audio stream when done
@@ -213,6 +220,8 @@ class GladosEventHandler(AsyncEventHandler):
         assert self._sentence_queue is not None
         pcm_queue: asyncio.Queue[Any] = asyncio.Queue()
         pump_task = asyncio.create_task(self._pump_sentence(text, pcm_queue))
+        self._pump_tasks.add(pump_task)
+        pump_task.add_done_callback(self._pump_tasks.discard)
         await self._sentence_queue.put((pcm_queue, pump_task))
 
     async def _pump_sentence(self, text: str, pcm_queue: asyncio.Queue[Any]) -> None:
@@ -282,6 +291,18 @@ class GladosEventHandler(AsyncEventHandler):
                     "Ignoring drain task error during cancellation", exc_info=err
                 )
             self._drain_task = None
+        # Cancel any synthesis tasks still running so they stop using the GPU
+        # and don't leak once the drain task is gone.
+        for task in list(self._pump_tasks):
+            task.cancel()
+        for task in list(self._pump_tasks):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.debug("Ignoring pump task error during cancel", exc_info=err)
+        self._pump_tasks.clear()
         self._sentence_queue = None
 
     async def disconnect(self) -> None:

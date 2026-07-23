@@ -525,8 +525,11 @@ class TestHandleSynthesize:
         result = await _call_private_async(handler, "_handle_synthesize", synthesize)
 
         assert result is True
-        # Should have sent Error event and AudioStop
-        assert handler.write_event.call_count >= 2
+        # The failure happens before any audio is written, so only an Error
+        # event is sent — no AudioStop, since there was no AudioStart to close
+        # (previously a stray AudioStop was emitted here).
+        assert handler.write_event.call_count == 1
+        assert handler.audio_started is False
 
         # Find the error event
         calls = handler.write_event.call_args_list
