@@ -84,3 +84,4 @@ jobs:
       - name: Report image size
         run: |
           docker images wyoming-glados:build-check --format '{{.Size}}'
+# (re-trigger)
