@@ -44,15 +44,22 @@ jobs:
           platforms: linux/amd64
 
       - name: Import smoke test (venv relocated onto the slim runtime, no GPU)
+        # torch + tensorrt import cleanly without a GPU and prove the venv
+        # relocated. torch_tensorrt is NOT imported here: it eagerly probes for
+        # an NVIDIA driver at import time (Tegra detection) and raises on the
+        # GPU-less CI runner, so we only assert it is present/relocated via
+        # find_spec. Its real functionality is covered by the GPU server-start
+        # validation done before release.
         run: |
           docker run --rm \
             --entrypoint /usr/src/wyoming-glados/venv/bin/python \
             -w /usr/src/wyoming-glados \
             wyoming-glados:build-check \
-            -c "import torch, tensorrt, torch_tensorrt; \
+            -c "import torch, tensorrt, importlib.util; \
+                assert importlib.util.find_spec('torch_tensorrt'), 'torch_tensorrt missing'; \
                 print('torch', torch.__version__); \
                 print('tensorrt', tensorrt.__version__); \
-                print('torch_tensorrt', torch_tensorrt.__version__)"
+                print('torch_tensorrt present (GPU-only import path skipped)')"
 
       - name: Models baked into the runtime image (matches run.sh MODEL_DIR)
         run: |
