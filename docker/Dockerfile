@@ -42,7 +42,7 @@ RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https:
 # injected by the NVIDIA container runtime. Drops the ~3.8 GB CUDA devel
 # toolkit + build toolchain that the self-contained venv makes redundant.
 # ===========================================================================
-FROM ubuntu:24.04 AS runtime
+FROM ubuntu:26.04 AS runtime
 
 RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99network-resilience \
     && apt-get update && apt-get install -y --no-install-recommends \
