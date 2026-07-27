@@ -7,7 +7,7 @@
 # into the runtime image — the venv is self-contained (torch bundles its CUDA/
 # cuDNN wheels, tensorrt/torch-tensorrt are wheels).
 # ===========================================================================
-FROM nvcr.io/nvidia/tensorrt:26.06-py3 AS builder
+FROM nvcr.io/nvidia/tensorrt:26.07-py3 AS builder
 
 WORKDIR /usr/src
 
