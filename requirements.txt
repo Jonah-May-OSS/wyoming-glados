@@ -5,7 +5,7 @@ inflect~=7.5.0
 numpy~=2.5.1
 pydub~=0.25.1
 regex~=2026.7.19
-torch==2.12.1
+torch==2.13.0
 torch-tensorrt==2.12.1
 Unidecode~=1.4.0
 audioop-lts~=0.2.2; python_version>='3.13'
