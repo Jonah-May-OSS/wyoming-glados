@@ -65,7 +65,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.13'
+          python-version: '3.14'
 
       # No CUDA toolkit install: every dependency is a prebuilt wheel (torch,
       # torch-tensorrt, torchvision, scipy, ...) with no source compilation, so
