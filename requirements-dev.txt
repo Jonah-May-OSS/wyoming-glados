@@ -9,4 +9,4 @@ pylint~=4.0.6
 # Stub-only package so pyright can resolve `import pandas` in the gladostts
 # submodule without installing pandas itself (it pins torch/numpy versions that
 # conflict with requirements.txt).
-pandas-stubs~=3.0.3.260530
+pandas-stubs~=3.0.5.260730
