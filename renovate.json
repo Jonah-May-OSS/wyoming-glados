@@ -5,6 +5,10 @@
   "labels": ["renovate"],
   "configMigration": true,
   "forkProcessing": "enabled",
+  "vulnerabilityAlerts": {
+    "description": "Renovate applies vulnerabilityAlerts on top of packageRules with groupName: null, which un-grouped the torch security bump into its own PR (renovate/pypi-torch-vulnerability) while the PyTorch group PR moved only torch-tensorrt. Either half alone is uninstallable. Naming the group here keeps security bumps inside it.",
+    "groupName": "PyTorch"
+  },
   "packageRules": [
     {
       "groupName": "PyTorch",
@@ -12,6 +16,13 @@
       "automerge": true,
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
       "matchPackageNames": ["torch", "torch-tensorrt", "torchvision", "torchaudio"]
+    },
+    {
+      "description": "The runtime stage relocates a --copies venv built on the NGC base (Ubuntu 24.04 / python3.12). A venv loads its stdlib from base_prefix, so the runtime must ship the same python minor. Bumping ubuntu to 26.04 (resolute) dropped the python3.12 package and broke the Docker Build Check. Majors need the python3.x pin moved in lockstep, so hold them for a human.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ubuntu"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     },
     {
       "automerge": true,

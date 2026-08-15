@@ -4,7 +4,10 @@ from collections.abc import Iterable
 
 import regex as re
 
-SENTENCE_END = r"[.!?…]|[。！？]|[؟]|[।॥]"
+# Kept as one non-capturing group so the `+` in BOUNDARY_RE applies to the whole
+# alternation. Without it, `+` bound only to the last branch and a run like
+# "..." matched one period at a time, emitting bare "." segments.
+SENTENCE_END = r"(?:[.!?…]|[。！？]|[؟]|[।॥])"
 CLAUSE_BREAK = r"[,;:，、؛：]"
 BOUNDARY_RE = re.compile(
     rf"(?P<strong>{SENTENCE_END}+)|(?P<clause>{CLAUSE_BREAK})(?=\s)"
@@ -13,6 +16,12 @@ ABBREVIATION_RE = re.compile(
     r"(?:(?:\b\p{L}\.){1,4}|\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc)\.)$",
     re.IGNORECASE | re.UNICODE,
 )
+# A run of dots or the ellipsis character ("...", "…"), as opposed to a single
+# sentence-ending period.
+ELLIPSIS_RE = re.compile(r"[.…]{2,}|…")
+# What the text after an ellipsis looks like when it starts a new sentence:
+# a capital, possibly behind an opening quote or bracket.
+SENTENCE_START_RE = re.compile(r"[\"'“‘«(\[]*[\p{Lu}\p{Lt}]", re.UNICODE)
 WORD_RE = re.compile(r"\p{L}[\p{L}\p{M}'’-]*|\d+", re.UNICODE)
 WORD_ASTERISKS = re.compile(r"\*+([^\*]+)\*+")
 LINE_ASTERISKS = re.compile(r"(?<=^|\n)\s*\*+")
@@ -50,8 +59,10 @@ class SentenceBoundaryDetector:
             trailing = self.remaining_text[boundary_index:]
 
             if match.lastgroup == "strong":
-                if self._is_abbreviation(candidate) or self._is_decimal(
-                    candidate, trailing
+                if (
+                    self._is_abbreviation(candidate)
+                    or self._is_decimal(candidate, trailing)
+                    or self._is_pause_ellipsis(match.group("strong"), trailing)
                 ):
                     continue
 
@@ -102,6 +113,25 @@ class SentenceBoundaryDetector:
             return False
         rest = trailing.lstrip()
         return not rest or bool(re.match(r"\d", rest))
+
+    @staticmethod
+    def _is_pause_ellipsis(boundary: str, trailing: str) -> bool:
+        """An ellipsis is a dramatic pause unless a new sentence clearly follows.
+
+        GLaDOS leans on "..." mid-sentence ("something more... educational.").
+        Splitting there hands the vocoder the tail as its own stub utterance,
+        which comes out clipped, so keep the pause inside the sentence. A
+        following capital does start a new sentence and still splits. While
+        streaming the tail may not have arrived yet; as with a trailing decimal
+        point, treat the undecidable case as a pause and let the next chunk --
+        or finish() -- settle it.
+        """
+        if not ELLIPSIS_RE.fullmatch(boundary):
+            return False
+        rest = trailing.lstrip()
+        if not rest:
+            return True
+        return not SENTENCE_START_RE.match(rest)
 
 
 def remove_asterisks(text: str) -> str:
