@@ -9,3 +9,21 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    # Renovate owns pip version updates (see renovate.json) — running both bots
+    # on the same ecosystem turned one torch bump into four competing PRs. A
+    # limit of 0 disables Dependabot's version updates only; security updates
+    # are unaffected and still open.
+    open-pull-requests-limit: 0
+    # torch and torch-tensorrt are version-locked: torch-tensorrt 2.13.0
+    # requires torch>=2.13.0,<2.14.0, so a PR that moves one without the other
+    # leaves requirements.txt uninstallable. Security updates are the only PRs
+    # Dependabot still raises here, and they default to one-per-package, so
+    # they need an explicit security-updates group to stay together.
+    groups:
+      pytorch-security:
+        applies-to: security-updates
+        patterns:
+          - "torch"
+          - "torch-tensorrt"
+          - "torchvision"
+          - "torchaudio"

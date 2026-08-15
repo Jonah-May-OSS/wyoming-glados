@@ -104,9 +104,44 @@ class TestSentenceBoundaryDetector:
         assert list(d.add_chunk("This is *important*. ")) == ["This is important."]
         assert d.finish() == ""
 
-    def test_ellipsis(self):
+    def test_trailing_ellipsis_buffers_until_the_stream_ends(self):
         d = SentenceBoundaryDetector()
-        assert list(d.add_chunk("Wait for it… ")) == ["Wait for it…"]
+
+        # Undecidable while streaming: the next chunk may continue the
+        # sentence, so hold it rather than guess.
+        assert not list(d.add_chunk("Wait for it… "))
+        assert d.finish() == "Wait for it…"
+
+    def test_ellipsis_before_a_new_sentence_splits(self):
+        d = SentenceBoundaryDetector()
+
+        assert list(d.add_chunk("Wait for it… There it is. ")) == [
+            "Wait for it…",
+            "There it is.",
+        ]
+        assert d.finish() == ""
+
+    def test_ellipsis_pause_stays_in_one_sentence(self):
+        d = SentenceBoundaryDetector()
+
+        assert not list(d.add_chunk("I can offer something more... "))
+        assert list(d.add_chunk("educational. ")) == [
+            "I can offer something more... educational."
+        ]
+        assert d.finish() == ""
+
+    def test_dot_run_never_emits_bare_punctuation(self):
+        d = SentenceBoundaryDetector()
+
+        out = list(d.add_chunk("Something more... Educational. "))
+
+        assert out == ["Something more...", "Educational."]
+        assert d.finish() == ""
+
+    def test_combined_terminators_are_one_boundary(self):
+        d = SentenceBoundaryDetector()
+
+        assert list(d.add_chunk("Really?! Yes. ")) == ["Really?!", "Yes."]
         assert d.finish() == ""
 
     def test_empty_chunk(self):
