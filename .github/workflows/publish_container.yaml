@@ -78,6 +78,13 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          # zstd layers: smaller pushes/pulls than gzip and much faster to
+          # decompress. force-compression recompresses the CUDA base layers too,
+          # otherwise they'd stay gzip and most of the image wouldn't benefit.
+          # zstd requires OCI media types. BuildKit's zstd encoder caps out
+          # below CLI zstd, so a level above ~9 is just "best available".
+          # NOTE: pulling zstd layers needs Docker 23+ / a containerd-era client.
+          outputs: type=image,oci-mediatypes=true,compression=zstd,compression-level=19,force-compression=true
 
       - name: Extract metadata (tags, labels) for iGPU
         id: meta-igpu
@@ -97,3 +104,5 @@ jobs:
           tags: ${{ steps.meta-igpu.outputs.tags }}
           labels: ${{ steps.meta-igpu.outputs.labels }}
           platforms: linux/arm64
+          # zstd layers, same as the dGPU image above.
+          outputs: type=image,oci-mediatypes=true,compression=zstd,compression-level=19,force-compression=true
