@@ -127,6 +127,46 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
         assert path.read_bytes() == b"0" * 2048
 
 
+def test_a_partial_refresh_commits_nothing(tmp_path):
+    """The graph and its config are one artefact; never commit half of them.
+
+    The .onnx.json carries the phoneme_id_map and speaker table for that exact
+    graph, so a refreshed config beside a stale graph loads fine and then
+    speaks garbage - and __main__ only checks that both files exist.
+    """
+    base_url = "https://example.com/{file}"
+    old_bytes = b"0" * 2048
+    graph = tmp_path / "glados.onnx"
+    config = tmp_path / "glados.onnx.json"
+    for path in (graph, config):
+        path.write_bytes(old_bytes)
+
+    def fake_urlopen(request_or_url, *_args, **_kwargs):
+        response = MagicMock()
+        response.__enter__ = lambda self: self
+        response.__exit__ = lambda self, *exc: False
+        response.headers = {"Content-Length": "4096"}
+        if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
+            return response
+        # The config downloads; the graph does not.
+        url = getattr(request_or_url, "full_url", request_or_url)
+        if str(url).endswith(".json"):
+            response.read = MagicMock(side_effect=[b"1" * 4096, b""])
+            return response
+        raise OSError("connection reset")
+
+    with (
+        patch("download.is_valid_file", return_value=True),
+        patch("download.urlopen", side_effect=fake_urlopen),
+    ):
+        assert ensure_model_exists(tmp_path, base_url) is False
+
+    # Neither file moved: an old-but-matched pair beats a new mismatched one.
+    assert graph.read_bytes() == old_bytes
+    assert config.read_bytes() == old_bytes
+    assert not list(tmp_path.glob("*.part"))
+
+
 def test_a_failed_refresh_keeps_the_working_voice(tmp_path):
     """A transient network error must not leave the deployment with no voice.
 
@@ -362,9 +402,14 @@ def test_download_is_atomic_via_a_sidecar(tmp_path, monkeypatch):
 
     ensure_model_exists(tmp_path, download.DEFAULT_URL)
 
-    # Both files are fetched; at no point during either transfer may a
-    # partially written file sit at the final path.
+    # Both files are fetched, and no final path is written during EITHER
+    # transfer. The commit is now a set operation: the sidecars are renamed
+    # only once every file has arrived, so both .part files coexist during the
+    # second transfer rather than the first having already been committed.
+    # That is what stops a failed .onnx and a successful .onnx.json from
+    # leaving a graph and a config that do not belong to each other.
     assert len(seen) == 2
     assert seen[0]["finals"] == [], "final path was written in place"
+    assert seen[1]["finals"] == [], "a file was committed before the set was complete"
     assert seen[0]["parts"] == ["glados.onnx.part"]
-    assert seen[1]["parts"] == ["glados.onnx.json.part"]
+    assert seen[1]["parts"] == ["glados.onnx.json.part", "glados.onnx.part"]

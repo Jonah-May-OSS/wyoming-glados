@@ -86,13 +86,19 @@ else
   # one. Worse, the old glob could not match an epoch=...-val_mcd=... name at
   # all, so the val_mcd checkpoints were unreachable without an explicit path.
   #
+  # -n with /p so lines that do not match are DROPPED. Anchoring on
+  # '<metric>.ckpt' missed Lightning's -vN collision suffix
+  # (epoch=99-val_mcd=9.999-v1.ckpt), and an unmatched line passed through
+  # unchanged, sorted ahead of every numeric one, and won - selecting the
+  # worst checkpoint instead of the best.
+  #
   # val_mel remains the fallback for runs trained before val_mcd was added.
   CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mcd=*.ckpt" \
-    | sed 's/.*val_mcd=\([0-9.]*\)\.ckpt/\1 &/' \
+    | sed -n 's/.*val_mcd=\([0-9]*\.[0-9]*\).*/\1 &/p' \
     | sort -n | head -1 | cut -d' ' -f2-)"
   if [ -z "${CKPT:-}" ]; then
     CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mel=*.ckpt" \
-      | sed 's/.*val_mel=\([0-9.]*\)\.ckpt/\1 &/' \
+      | sed -n 's/.*val_mel=\([0-9]*\.[0-9]*\).*/\1 &/p' \
       | sort -n | head -1 | cut -d' ' -f2-)"
   fi
 fi

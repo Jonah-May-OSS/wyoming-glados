@@ -81,6 +81,7 @@ BUILDER_OPTIMIZATION_LEVEL = 2
 # VITS inference scales: [noise_scale, length_scale, noise_w].
 DEFAULT_NOISE_SCALE = 0.667
 DEFAULT_NOISE_W = 0.8
+DEFAULT_LENGTH_SCALE = 1.0
 DEFAULT_ESPEAK_VOICE = "en-us"
 
 _INT16_MAX = 32767.0
@@ -141,7 +142,11 @@ def missing_profile_inputs(message: str) -> list[str]:
     # name. strip() does not remove it, so that name matches nothing, the
     # profile comes back empty, and the session falls back to rebuilding an
     # engine per request.
-    tail = message.split(_MISSING_PROFILE_MARKER, 1)[1].splitlines()[0]
+    # splitlines() on an empty tail is [], so index 0 would raise. Inside
+    # _trt_profiles that IndexError is swallowed by the outer handler and
+    # silently abandons every profile - the failure this parsing serves.
+    tail_lines = message.split(_MISSING_PROFILE_MARKER, 1)[1].splitlines()
+    tail = tail_lines[0] if tail_lines else ""
     return [name.strip() for name in tail.split(",") if name.strip()]
 
 
@@ -444,6 +449,7 @@ class PiperTTSRunner:
         self.espeak_voice = DEFAULT_ESPEAK_VOICE
         self.noise_scale = DEFAULT_NOISE_SCALE
         self.noise_w = DEFAULT_NOISE_W
+        self.length_scale = DEFAULT_LENGTH_SCALE
 
         if self.session is None:
             self._load(use_trt=use_trt)
@@ -647,6 +653,7 @@ class PiperTTSRunner:
         self.espeak_voice = espeak.get("voice") or DEFAULT_ESPEAK_VOICE
         self.noise_scale = float(inference.get("noise_scale", DEFAULT_NOISE_SCALE))
         self.noise_w = float(inference.get("noise_w", DEFAULT_NOISE_W))
+        self.length_scale = float(inference.get("length_scale", DEFAULT_LENGTH_SCALE))
 
         cache_dir = engine_cache_dir(self.models_dir, self.model_path)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -740,8 +747,13 @@ class PiperTTSRunner:
             "input_lengths": np.array([true_length], dtype=np.int64),
         }
         if self.wants_scales:
+            # alpha multiplies the voice's own length_scale rather than
+            # replacing it: a voice tuned to 1.3 spoke at 1.0 while the
+            # other two inference values were read from its config.
             feed["scales"] = build_scales(
-                alpha, noise_scale=self.noise_scale, noise_w=self.noise_w
+                alpha * self.length_scale,
+                noise_scale=self.noise_scale,
+                noise_w=self.noise_w,
             )
         if self.wants_sid:
             feed["sid"] = np.array([self.speaker_id], dtype=np.int64)

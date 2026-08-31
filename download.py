@@ -97,6 +97,52 @@ def is_valid_file(file_path: Path, expected_md5: str | None) -> bool:
     return True
 
 
+def _classify(model: ModelFile, path: Path, url: str) -> tuple[bool, bool]:
+    """Decide what to do with one file already on disk.
+
+    Returns (leave_alone, still_usable):
+
+    * leave_alone - the file is current; skip it entirely.
+    * still_usable - it works, but is out of date. Callers keep it until a
+      replacement is safely in hand, so a failed refresh never costs a working
+      voice.
+
+    A checksum settles currency outright. Without one, "exists and over 1024
+    bytes" is not the same as "current": DEFAULT_URL points at
+    releases/latest, so republishing a retrained voice changes what that URL
+    serves while the stale file keeps passing, and every existing deployment
+    stays on the old voice forever - the opposite of what `latest` is for.
+
+    Sizes catch that. Weaker than a checksum (a retrained voice that happens to
+    match byte-for-byte in length is missed), but it needs no published hash
+    and fails safe: remote_size returns None when offline, and the file stays.
+    """
+    if not is_valid_file(path, model["md5"]):
+        return False, False
+    if model["md5"] is not None:
+        return True, True
+
+    try:
+        local_size = path.stat().st_size
+    except OSError:
+        # is_valid_file vouched for it; with nothing to compare against, take
+        # that verdict rather than re-downloading on a stat error.
+        return True, True
+
+    expected_size = remote_size(url)
+    if expected_size is None or expected_size == local_size:
+        return True, True
+
+    _LOGGER.info(
+        "File %s is %d bytes but %s now serves %d; re-downloading.",
+        path,
+        local_size,
+        url,
+        expected_size,
+    )
+    return False, True
+
+
 def ensure_model_exists(
     download_dir: Path, base_url: str, voice_name: str = "glados"
 ) -> bool:
@@ -130,75 +176,39 @@ def ensure_model_exists(
         },
     ]
 
+    # Two phases: fetch every file that needs replacing into a sidecar, then
+    # rename them into place only once ALL of them arrived.
+    #
+    # Per-file commits could leave a mismatched pair. The .onnx and .onnx.json
+    # are one artefact - the config carries the phoneme_id_map and speaker
+    # table for that exact graph - so refreshing the config while the graph
+    # failed produces a voice that loads and then speaks garbage. __main__'s
+    # fallback only checks that both files exist, so it would serve it.
     all_present = True
+    pending: list[tuple[ModelFile, Path, Path, bool]] = []
+
     for model in model_files:
         model_file = model["filename"]
         model_file_path = download_dir / model_file
         model_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         model_url = base_url.format(file=model_file.rsplit("/", maxsplit=1)[-1])
-        stale_but_usable = False
 
-        if is_valid_file(model_file_path, model["md5"]):
-            # A checksum settles it. Without one, "exists and over 1024 bytes"
-            # is not the same as "current": DEFAULT_URL points at
-            # releases/latest, so republishing a retrained voice changes what
-            # that URL serves while the stale file on disk keeps passing. Every
-            # existing deployment would then stay on the old voice forever,
-            # which is the opposite of what pointing at `latest` is for.
-            #
-            # Compare sizes to catch that. It is weaker than a checksum - a
-            # retrained voice that happens to be byte-identical in length is
-            # not detected - but it needs no published hash, and it fails safe:
-            # remote_size returns None when offline, and the file is kept.
-            if model["md5"] is not None:
-                _LOGGER.info("File %s is valid.", model_file_path)
-                continue
-
-            try:
-                local_size = model_file_path.stat().st_size
-            except OSError:
-                # is_valid_file vouched for this file; if it cannot be stat'd
-                # there is nothing to compare a remote size against, so take
-                # that verdict rather than re-downloading on a stat error.
-                _LOGGER.info("File %s is valid.", model_file_path)
-                continue
-
-            expected_size = remote_size(model_url)
-            if expected_size is None or expected_size == local_size:
-                _LOGGER.info("File %s is valid.", model_file_path)
-                continue
-
-            _LOGGER.info(
-                "File %s is %d bytes but %s now serves %d; re-downloading.",
-                model_file_path,
-                local_size,
-                model_url,
-                expected_size,
-            )
-            stale_but_usable = True
-
-        # An invalid file must go: leaving it would let __main__'s "continue
-        # with the existing voice" fallback serve something corrupt.
-        #
-        # A valid-but-stale one is deliberately kept. The sidecar rename below
-        # replaces it atomically, so deleting it first buys nothing and costs
-        # everything if the re-download then fails - a transient network error
-        # while refreshing a working voice would leave the deployment with no
-        # voice at all.
-        if not stale_but_usable and model_file_path.exists():
-            model_file_path.unlink()
-        # Download the file
+        leave_alone, usable = _classify(model, model_file_path, model_url)
+        if leave_alone:
+            _LOGGER.info("File %s is valid.", model_file_path)
+            continue
 
         part_path = model_file_path.with_name(model_file_path.name + ".part")
+        pending.append((model, model_file_path, part_path, usable))
+
+    # Phase 1: fetch into sidecars. Nothing on disk changes yet.
+    fetched: list[tuple[ModelFile, Path, Path]] = []
+    for model, model_file_path, part_path, _usable in pending:
+        model_file = model["filename"]
+        model_url = base_url.format(file=model_file.rsplit("/", maxsplit=1)[-1])
         try:
             _LOGGER.info("Downloading %s to %s", model_url, model_file_path)
-            # Download to a sidecar and rename only once complete. Both
-            # files carry md5=None, so is_valid_file's only real gate is
-            # "larger than 1024 bytes" - a download killed midway would leave a
-            # truncated model that passes that check on every later run and is
-            # never re-fetched. fetch.py guards the same failure for wiki audio
-            # with is_wav_complete; this is the same idea, done atomically.
             with (
                 urlopen(_quote_url(model_url)) as response,
                 open(part_path, "wb") as out_file,
@@ -224,31 +234,41 @@ def ensure_model_exists(
                 raise OSError(
                     f"{model_url}: expected {expected_bytes} bytes, received {written}"
                 )
-
-            part_path.replace(model_file_path)
-            _LOGGER.info("Downloaded %s", model_file_path)
-
-            # Verify MD5 hash after download
-
-            if is_valid_file(model_file_path, model["md5"]):
-                _LOGGER.info("Verified MD5 hash for %s.", model_file_path)
-            else:
-                _LOGGER.error(
-                    "MD5 hash mismatch after download for %s.", model_file_path
-                )
-                if model_file_path.exists():
-                    model_file_path.unlink()
-                all_present = False
+            fetched.append((model, model_file_path, part_path))
         except Exception:
             _LOGGER.exception(
                 "Failed to download %s from %s",
                 model_file_path,
                 _quote_url(model_url),
             )
-            # Only the sidecar is ever partial; model_file_path is written
-            # solely by the atomic rename. Deleting it here would throw away
-            # the very file the stale-but-usable path is preserving.
+            all_present = False
+
+    # Phase 2: commit, but only as a set.
+    if pending and len(fetched) != len(pending):
+        _LOGGER.error(
+            "Only %d of %d voice files downloaded; keeping the existing voice "
+            "rather than committing a mismatched set.",
+            len(fetched),
+            len(pending),
+        )
+        for _model, model_file_path, part_path, usable in pending:
             part_path.unlink(missing_ok=True)
+            # A file that was already unusable stays unusable, and leaving it
+            # would let __main__'s existence check serve something corrupt.
+            # One that was merely stale still works, so it is kept.
+            if not usable and model_file_path.exists():
+                model_file_path.unlink()
+        return False
+
+    for model, model_file_path, part_path in fetched:
+        part_path.replace(model_file_path)
+        _LOGGER.info("Downloaded %s", model_file_path)
+        if is_valid_file(model_file_path, model["md5"]):
+            _LOGGER.info("Verified MD5 hash for %s.", model_file_path)
+        else:
+            _LOGGER.error("MD5 hash mismatch after download for %s.", model_file_path)
+            if model_file_path.exists():
+                model_file_path.unlink()
             all_present = False
 
     return all_present
