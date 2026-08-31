@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+# >=77 for PEP 639: the SPDX `license` string and `license-files` below are
+# rejected by older setuptools, which would only surface for someone with a
+# pinned build environment since isolated builds fetch the latest.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,14 +10,22 @@ name = "wyoming-glados"
 version = "0.1.0"
 description = "Wyoming protocol server for GLaDOS TTS"
 requires-python = ">=3.11"
+# GPL-3.0-or-later, not MIT: piper_runtime imports piper.phonemize_espeak at
+# request time and the published image ships piper-tts, which is
+# GPL-3.0-or-later. See NOTICE.md.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE.md", "NOTICE.md"]
+
+# Explicit, because flat-layout auto-discovery fails on this repo: it sees
+# data/, docker/ and tests/ as top-level packages and refuses to guess. Only
+# the runtime packages ship; dataset_tools is build-time tooling and is
+# excluded from the image by .dockerignore too.
+[tool.setuptools]
+packages = ["server", "piper_runtime"]
 
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-exclude = [
-    "gladostts",  # Exclude submodule from linting
-]
-
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
@@ -34,11 +45,9 @@ ignore = [
 "__main__.py" = ["E402"]  # Module level imports not at top (needed for warning suppression)
 
 [tool.ruff.lint.isort]
-# Pin first-party packages explicitly. Otherwise ruff auto-detects them from the
-# source tree, which is empty for the `gladostts` submodule in the Ruff CI job
-# (it checks out without submodules) — causing ruff to mis-sort gladostts as
-# third-party and fight pylint, which checks out submodules and sees it as first-party.
-known-first-party = ["gladostts", "server"]
+# Pin first-party packages explicitly so every linter agrees on import order
+# regardless of what happens to be present in the checkout.
+known-first-party = ["dataset_tools", "piper_runtime", "server"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -60,7 +69,6 @@ addopts = [
 [tool.coverage.run]
 omit = [
     "tests/*",
-    "gladostts/*",
     "docker/*",
     "htmlcov/*",
 ]
@@ -79,7 +87,8 @@ include = [
     "__main__.py",
     "download.py",
     "server",
-    "gladostts",
+    "piper_runtime",
+    "dataset_tools",
 ]
 exclude = [
     "tests",
@@ -95,7 +104,11 @@ exclude = [
     "**/.mypy_cache",
     "**/.pytest_cache",
     "**/.ruff_cache",
-    "gladostts/models",
+    # Training-only helpers. They import onnx and piper.train, which live in
+    # the WSL training venv and are deliberately absent from the runtime
+    # requirements, so type checking them in CI only produces import noise.
+    "dataset_tools/bake_scales.py",
+    "dataset_tools/export_onnx.py",
 ]
 reportMissingModuleSource = "none"
 reportMissingTypeStubs = "none"

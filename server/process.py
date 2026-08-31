@@ -1,16 +1,21 @@
 """Process and process-manager helpers for the GLaDOS TTS runner."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from gladostts.glados import TTSRunner  # Import your TTSRunner from glados.py
+if TYPE_CHECKING:
+    from piper_runtime import PiperTTSRunner
+
+    Runner = PiperTTSRunner
 
 _LOGGER = logging.getLogger(__name__)
 
-# Audio format produced by the GLaDOS vocoder (22050 Hz, 16-bit mono).
+# Audio format produced by the VITS model (22050 Hz, 16-bit mono).
 
 SAMPLE_RATE = 22050
 SAMPLE_WIDTH = 2
@@ -24,7 +29,7 @@ _stream_end = object()
 class GladosProcess:
     """Info for a running GLaDOS process (one TTS instance)."""
 
-    def __init__(self, voice_name: str, runner: TTSRunner) -> None:
+    def __init__(self, voice_name: str, runner: Runner) -> None:
         self.voice_name = voice_name
         self.runner = runner
         self.last_used = time.monotonic_ns()
@@ -73,10 +78,10 @@ class GladosProcess:
 
 
 class GladosProcessManager:
-    """Manages GLaDOS TTS process, initializes and interacts with TTSRunner."""
+    """Manages the GLaDOS TTS process and its runner."""
 
-    def __init__(self, runner: TTSRunner) -> None:
-        """Initialize the TTS process manager with an existing TTSRunner."""
+    def __init__(self, runner: Runner) -> None:
+        """Initialize the TTS process manager with an existing runner."""
         self.runner = runner  # Use the passed-in runner, don't initialize a new one
         self.processes: dict[str, GladosProcess] = {}
         self.processes_lock = asyncio.Lock()  # Lock for thread safety

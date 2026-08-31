@@ -6,9 +6,10 @@ cd /usr/src/wyoming-glados || { echo "Unable to cd into /usr/src/wyoming-glados"
 
 STREAMING=${STREAMING:-true}
 DEBUG=${DEBUG:-false}
-# download.py places models in gladostts/models; default MODEL_DIR must match
-# (the old /usr/src/models default pointed at an empty dir on a fresh build).
-MODEL_DIR=${MODEL_DIR:-"/usr/src/wyoming-glados/gladostts/models"}
+# The compose files mount a host directory here. Keeping the voice on a volume
+# lets the TensorRT engine cache persist across restarts, which is the
+# difference between a ~75s cold start and a ~1s warm one.
+MODEL_DIR=${MODEL_DIR:-"/usr/src/models"}
 
 # Initialize empty flags
 STREAMING_FLAG=""

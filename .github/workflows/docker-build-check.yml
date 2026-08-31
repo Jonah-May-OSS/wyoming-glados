@@ -19,6 +19,13 @@ on:
       - "requirements-piper.txt"
       - "docker/run.sh"
       - ".github/workflows/docker-build-check.yml"
+      # The image COPYs the repo, so any source change can break it -
+      # in particular the import smoke test that catches a runtime
+      # dependency missing from requirements.txt.
+      - "__main__.py"
+      - "download.py"
+      - "server/**"
+      - "piper_runtime/**"
   workflow_dispatch: {}
 
 concurrency:

@@ -22,3 +22,8 @@ __pycache__/
 htmlcov/
 *.cover
 .hypothesis/
+# Training corpus (fetched, ~1 GB) - never commit
+data/
+
+# Model files fetched at runtime into the mounted volume
+models/

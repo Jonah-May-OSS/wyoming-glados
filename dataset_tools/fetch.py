@@ -1,0 +1,189 @@
+"""Polite, resumable fetching of wiki pages and voice-line audio.
+
+Fetching the corpus means ~1,800 requests to a community-run wiki, so every
+call is rate limited, retried with backoff, and cached to disk. Re-running
+after an interruption re-downloads only what is missing.
+"""
+
+from __future__ import annotations
+
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .portalwiki import PAGES, WIKI_BASE, VoiceLine, parse_page
+
+USER_AGENT = (
+    "wyoming-glados-dataset/0.1 (+https://github.com/Jonah-May-OSS/wyoming-glados)"
+)
+
+# Seconds between requests. The wiki is community hosted and this crawl is a
+# one-off, so it is deliberately unhurried.
+DEFAULT_DELAY = 0.25
+DEFAULT_RETRIES = 3
+DEFAULT_TIMEOUT = 30.0
+
+# A RIFF/WAVE header is 44 bytes; anything at or below that has no audio.
+_WAV_HEADER_BYTES = 44
+
+Opener = Callable[[str], bytes]
+
+
+class FetchError(RuntimeError):
+    """A URL could not be retrieved after exhausting retries."""
+
+
+@dataclass
+class FetchReport:
+    """Outcome of a batch fetch."""
+
+    downloaded: int = 0
+    skipped: int = 0
+    failures: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """True when nothing failed."""
+        return not self.failures
+
+
+def http_opener(
+    *, user_agent: str = USER_AGENT, timeout: float = DEFAULT_TIMEOUT
+) -> Opener:
+    """Build an opener that issues real HTTP requests."""
+
+    def _open(url: str) -> bytes:
+        request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return bytes(response.read())
+
+    return _open
+
+
+def _sleep(seconds: float) -> None:
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def fetch_with_retries(
+    url: str,
+    opener: Opener,
+    *,
+    retries: int = DEFAULT_RETRIES,
+    backoff: float = 1.0,
+    sleep: Callable[[float], None] = _sleep,
+) -> bytes:
+    """Fetch a URL, retrying transient failures with exponential backoff."""
+    last: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return opener(url)
+        except ValueError as exc:
+            # A malformed URL will never succeed; do not burn retries on it.
+            raise FetchError(f"{url}: {exc}") from exc
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            last = exc
+            if attempt < retries - 1:
+                sleep(backoff * (2**attempt))
+    raise FetchError(f"{url}: {last}") from last
+
+
+def safe_filename(url: str) -> str:
+    """Local filename for an audio URL, percent-decoded and path-safe."""
+    name = urllib.parse.unquote(url.rsplit("/", 1)[-1])
+    return "".join("_" if ch in r'\/:*?"<>|' else ch for ch in name)
+
+
+def is_wav_complete(path: Path) -> bool:
+    """True when `path` holds a plausible, non-empty RIFF/WAVE file.
+
+    Guards against resuming onto a truncated file from an interrupted run.
+    """
+    try:
+        if path.stat().st_size <= _WAV_HEADER_BYTES:
+            return False
+        with path.open("rb") as handle:
+            header = handle.read(12)
+    except OSError:
+        return False
+    return header[:4] == b"RIFF" and header[8:12] == b"WAVE"
+
+
+def fetch_pages(
+    cache_dir: Path,
+    *,
+    opener: Opener,
+    delay: float = DEFAULT_DELAY,
+    sleep: Callable[[float], None] = _sleep,
+) -> list[VoiceLine]:
+    """Fetch and parse every source page, caching the HTML on disk."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    lines: list[VoiceLine] = []
+    for page, slug in PAGES.items():
+        path = cache_dir / f"{page}.html"
+        if not path.exists():
+            raw = fetch_with_retries(WIKI_BASE + slug, opener)
+            # Write through a .part file, as fetch_audio does. path.exists() is
+            # the resume check, so a run interrupted mid-write would otherwise
+            # leave a truncated page that every later run treats as complete -
+            # silently dropping whatever voice lines were cut off. Renaming
+            # into place makes the cached page either absent or whole.
+            temp = path.with_suffix(path.suffix + ".part")
+            temp.write_bytes(raw)
+            temp.replace(path)
+            sleep(delay)
+        html = path.read_text(encoding="utf-8", errors="replace")
+        lines.extend(parse_page(html, page))
+    return lines
+
+
+def find_filename_collisions(
+    lines: Sequence[VoiceLine],
+) -> dict[str, list[str]]:
+    """Map local filenames to URLs where more than one URL claims the name."""
+    by_name: dict[str, list[str]] = {}
+    for line in lines:
+        by_name.setdefault(safe_filename(line.url), []).append(line.url)
+    return {name: urls for name, urls in by_name.items() if len(urls) > 1}
+
+
+def fetch_audio(
+    lines: Iterable[VoiceLine],
+    audio_dir: Path,
+    *,
+    opener: Opener,
+    delay: float = DEFAULT_DELAY,
+    retries: int = DEFAULT_RETRIES,
+    sleep: Callable[[float], None] = _sleep,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> FetchReport:
+    """Download each line's audio into `audio_dir`, skipping complete files."""
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    todo = list(lines)
+    report = FetchReport()
+    for index, line in enumerate(todo, start=1):
+        path = audio_dir / safe_filename(line.url)
+        if is_wav_complete(path):
+            report.skipped += 1
+        else:
+            try:
+                payload = fetch_with_retries(
+                    line.url, opener, retries=retries, sleep=sleep
+                )
+            except FetchError as exc:
+                report.failures.append((line.url, str(exc)))
+            else:
+                # Write via a temp file so an interrupted run never leaves a
+                # truncated .wav that a later run would treat as complete.
+                temp = path.with_suffix(path.suffix + ".part")
+                temp.write_bytes(payload)
+                temp.replace(path)
+                report.downloaded += 1
+            sleep(delay)
+        if on_progress is not None:
+            on_progress(index, len(todo))
+    return report

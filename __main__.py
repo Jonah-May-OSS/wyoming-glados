@@ -10,30 +10,17 @@ import os
 import subprocess
 import sys
 import time
-import warnings
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
 
-import torch.nn.modules.transformer as _tfm
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer
 
-from gladostts.glados import TTSRunner
+from piper_runtime import PiperTTSRunner
 from server.handler import GladosEventHandler
 from server.process import GladosProcessManager
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-
-# hide nested tensor warning
-warnings.filterwarnings(
-    "ignore",
-    message="enable_nested_tensor is True, but self.use_nested_tensor is False",
-    module=r"torch\.nn\.modules\.transformer",
-)
-
-# actually disable it
-cast(Any, _tfm).enable_nested_tensor = False
 
 # logger
 logger = logging.getLogger(__name__)
@@ -61,6 +48,26 @@ def setup_logging(debug: bool, log_format: str) -> None:
     rootlogger.handlers = [handler]
 
     logger.debug("Logging has been configured.")
+
+
+def _warmup(runner: PiperTTSRunner) -> None:
+    """Run the warmup synthesis, logging rather than killing the server.
+
+    Engines are built during session creation now that TensorRT is given
+    explicit shape profiles, so this is a smoke test that inference works
+    rather than the seven-bucket, three-pass, budgeted walk it replaced.
+
+    Guarded because an exception here would otherwise vanish: a failed smoke
+    test should be visible in the log, not fatal to a server that can still
+    fall back to another provider.
+    """
+    started = time.monotonic()
+    try:
+        runner.warmup()
+    except Exception:
+        logger.exception("TensorRT warmup failed; serving without warm engines")
+    else:
+        logger.info("Warmup complete in %.1fs", time.monotonic() - started)
 
 
 async def main() -> None:
@@ -103,17 +110,31 @@ async def main() -> None:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--voice-name",
+        default=os.environ.get("VOICE_NAME", "glados"),
+        help="Basename of <name>.onnx in --models-dir",
+    )
+    parser.add_argument(
+        "--speaker",
+        default=os.environ.get("SPEAKER") or None,
+        help=(
+            "Speaker to synthesize as, for multi-speaker voices "
+            "(p1, p2, dota2, potato). Names resolve through the voice "
+            "config's speaker_id_map. Ignored by single-speaker voices; "
+            "defaults to id 0, which is NOT necessarily the one you want."
+        ),
+    )
     args = parser.parse_args()
 
     # Setup logging
 
     setup_logging(args.debug, args.log_format)
 
-    # Always (re)download models before startup
+    # Fetch the voice before startup. download.py verifies what is already
+    # on disk and only pulls what is missing, so this is cheap on restart.
 
     try:
-        # Add timeout to prevent hanging
-
         subprocess.run(
             [
                 sys.executable,
@@ -122,28 +143,35 @@ async def main() -> None:
                 str(args.models_dir),
                 *(["--debug"] if args.debug else []),
             ],
-            timeout=300,  # 5 minute timeout
+            timeout=300,
             check=True,
         )
-        logger.info("Models downloaded (or already up-to-date).")
+        logger.info("Voice model downloaded (or already up-to-date).")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         error_msg = (
             "timeout after 300s"
             if isinstance(e, subprocess.TimeoutExpired)
             else f"exit {e.returncode}"
         )
-        logger.error("Model download failed (%s); aborting.", error_msg)
-    # Exit if download.py failed
+        logger.error("Voice model download failed (%s).", error_msg)
 
     # Define voice attribution and voices
+    #
+    # This credits the VITS voice trained in this repository, not R2D2FISH's
+    # ForwardTacotron models, which the piper backend no longer uses.
 
     voice_attribution = Attribution(
-        name="R2D2FISH", url="https://github.com/R2D2FISH/glados-tts"
+        name="Jonah-May-OSS",
+        url="https://github.com/Jonah-May-OSS/wyoming-glados",
     )
+    # The advertised name is the one that was loaded, so it cannot drift from
+    # --voice-name. It used to be hardcoded "default" while the server loaded
+    # "glados", which would have become ambiguous as soon as a second voice
+    # existed.
     voices = [
         TtsVoice(
-            name="default",
-            description="Default GLaDOS voice",
+            name=args.voice_name,
+            description=f"GLaDOS VITS voice ({args.voice_name})",
             attribution=voice_attribution,
             installed=True,
             languages=["en"],
@@ -157,7 +185,7 @@ async def main() -> None:
         tts=[
             TtsProgram(
                 name="glados-tts",
-                description="A GLaDOS TTS using Forward Tacotron and HiFiGAN.",
+                description="A GLaDOS TTS using VITS via ONNX Runtime.",
                 attribution=voice_attribution,
                 installed=True,
                 voices=voices,
@@ -170,21 +198,35 @@ async def main() -> None:
     # Initialize GLaDOS TTS
 
     logger.debug("Initializing GLaDOS TTS engine...")
-    glados_tts = TTSRunner(
-        use_p1=False,
-        log=args.debug,
+    glados_tts = PiperTTSRunner(
         models_dir=args.models_dir,
+        voice_name=args.voice_name,
+        speaker=args.speaker,
     )
+    # NOTE: startup blocks until the TensorRT engines exist, and that happens
+    # in PiperTTSRunner() above - _load calls _trt_profiles, which creates real
+    # sessions to discover the profile inputs. The server binds afterwards.
+    #
+    # This used to run on a background thread, with a comment claiming the
+    # server accepted connections immediately and early requests fell back to
+    # the CUDA provider. That stopped being true when engine construction moved
+    # into session creation: by the time the thread started there was nothing
+    # left to defer, and _warmup measures 0.03s against a cold build of ~60s.
+    # The thread deferred nothing and hid where the time actually went.
+    #
+    # So this is synchronous and honest. The real mitigation is the on-disk
+    # engine cache: mount --models-dir on a volume and only the first start on
+    # a given voice and GPU pays the build. Home Assistant will mark the entity
+    # unavailable for that first cold start.
+    #
+    # Backgrounding the whole runner construction would let the server bind
+    # first, but then the first synthesize blocks for the same minute with no
+    # way to say why - a timeout mid-request rather than an entity that is
+    # briefly unavailable. That trade is worth making deliberately, not as a
+    # side effect.
+    _warmup(glados_tts)
     logger.debug("GLaDOS TTS engine initialized successfully.")
 
-    # Sanity-check RNN weights for cuDNN
-
-    try:
-        glados_model = cast(Any, glados_tts.glados)
-        glados_model.rnn.flatten_parameters()
-        logger.debug("Flattened RNN weights for best cuDNN performance.")
-    except (AttributeError, RuntimeError):
-        logger.debug("No .rnn to flatten (or already contiguous).")
     # Create the GladosProcessManager instance
 
     process_manager = GladosProcessManager(glados_tts)

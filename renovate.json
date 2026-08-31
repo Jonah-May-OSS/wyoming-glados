@@ -1,32 +1,70 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "assignees": ["JonahMMay"],
-  "labels": ["renovate"],
+  "extends": [
+    "config:recommended"
+  ],
+  "assignees": [
+    "JonahMMay"
+  ],
+  "labels": [
+    "renovate"
+  ],
   "configMigration": true,
   "forkProcessing": "enabled",
   "vulnerabilityAlerts": {
-    "description": "Renovate applies vulnerabilityAlerts on top of packageRules with groupName: null, which un-grouped the torch security bump into its own PR (renovate/pypi-torch-vulnerability) while the PyTorch group PR moved only torch-tensorrt. Either half alone is uninstallable. Naming the group here keeps security bumps inside it.",
-    "groupName": "PyTorch"
+    "description": "Renovate applies vulnerabilityAlerts on top of packageRules with groupName: null, which would split a coupled pair into two PRs where either half alone is uninstallable. Naming the group keeps security bumps inside it.",
+    "groupName": "ONNX Runtime + TensorRT"
   },
   "packageRules": [
     {
-      "groupName": "PyTorch",
-      "description": "Group the coupled torch ecosystem into one PR (torch and torch-tensorrt must move together). Match by package name; matchSourceUrls relied on PyPI source metadata and split them into separate PRs.",
-      "automerge": true,
-      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
-      "matchPackageNames": ["torch", "torch-tensorrt", "torchvision", "torchaudio"]
+      "groupName": "ONNX Runtime + TensorRT",
+      "description": "onnxruntime-gpu and tensorrt-cu13 are coupled: onnxruntime-gpu links libnvinfer.so.10, so they must move together or the TensorRT provider silently fails to load.",
+      "matchPackageNames": [
+        "onnxruntime-gpu",
+        "tensorrt-cu13"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "A tensorrt-cu13 major bump changes the libnvinfer soname. onnxruntime-gpu then cannot load the provider and ONNX Runtime falls back to CUDA silently - no error, roughly 5x less throughput. Never automerge that; a human must move onnxruntime-gpu in lockstep.",
+      "matchPackageNames": [
+        "tensorrt-cu13",
+        "onnxruntime-gpu"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false,
+      "enabled": false
     },
     {
       "description": "The runtime stage relocates a --copies venv built on the NGC base (Ubuntu 24.04 / python3.12). A venv loads its stdlib from base_prefix, so the runtime must ship the same python minor. Bumping ubuntu to 26.04 (resolute) dropped the python3.12 package and broke the Docker Build Check. Majors need the python3.x pin moved in lockstep, so hold them for a human.",
-      "matchDatasources": ["docker"],
-      "matchPackageNames": ["ubuntu"],
-      "matchUpdateTypes": ["major"],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ubuntu"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "enabled": false
     },
     {
       "automerge": true,
-      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"]
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ]
     }
   ]
 }

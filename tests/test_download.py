@@ -1,5 +1,6 @@
 """Unit tests for model download and validation helpers."""
 
+import contextlib
 import hashlib
 import io
 import logging
@@ -84,8 +85,8 @@ def test_ensure_model_exists_downloads_missing_files(tmp_path):
 
         ensure_model_exists(tmp_path, base_url)
 
-        assert urlopen_mock.call_count == 5
-        assert copy_mock.call_count == 5
+        assert urlopen_mock.call_count == 2
+        assert copy_mock.call_count == 2
 
 
 # ================================================================
@@ -95,11 +96,8 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
     base_url = "https://example.com/{file}"
 
     model_paths = [
-        tmp_path / "glados-new.pt",
-        tmp_path / "en_us_cmudict_ipa_forward.pt",
-        tmp_path / "emb/glados_p2.pt",
-        tmp_path / "vocoder-gpu.pt",
-        tmp_path / "vocoder-trt.ts",
+        tmp_path / "glados.onnx",
+        tmp_path / "glados.onnx.json",
     ]
 
     for p in model_paths:
@@ -120,12 +118,12 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
 def test_ensure_model_exists_removes_invalid_and_downloads(tmp_path):
     base_url = "https://example.com/{file}"
 
-    bad_file = tmp_path / "glados-new.pt"
+    bad_file = tmp_path / "glados.onnx"
     bad_file.parent.mkdir(parents=True, exist_ok=True)
     bad_file.write_bytes(b"bad")
 
     def fake_is_valid_file(path, _expected):
-        if path.name == "glados-new.pt":
+        if path.name == "glados.onnx":
             fake_is_valid_file.count += 1
             return fake_is_valid_file.count > 1
         return True
@@ -163,13 +161,13 @@ def test_ensure_model_exists_download_exception_hits_except(
     This covers line 130 and its cleanup behavior.
     """
 
-    file_path = tmp_path / "glados-new.pt"
+    file_path = tmp_path / "glados.onnx"
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text("partial")
 
     # Only fail for glados-new.pt
     def fake_is_valid(path, _md5):
-        return path.name != "glados-new.pt"
+        return path.name != "glados.onnx"
 
     monkeypatch.setattr(download, "is_valid_file", fake_is_valid)
 
@@ -197,12 +195,12 @@ def test_ensure_model_exists_md5_mismatch_after_download(tmp_path, monkeypatch, 
     This covers lines 134–156.
     """
 
-    file_path = tmp_path / "glados-new.pt"
+    file_path = tmp_path / "glados.onnx"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     # First model invalid → triggers download
     def fake_is_valid(path, _md5):
-        return path.name != "glados-new.pt"
+        return path.name != "glados.onnx"
 
     monkeypatch.setattr(download, "is_valid_file", fake_is_valid)
 
@@ -228,3 +226,66 @@ def test_ensure_model_exists_md5_mismatch_after_download(tmp_path, monkeypatch, 
 
     assert "MD5 hash mismatch after download" in caplog.text
     assert not file_path.exists()
+
+
+# ================================================================
+# Failure must be reportable: __main__ runs this with check=True
+# ================================================================
+def test_returns_false_when_a_download_fails(tmp_path, monkeypatch):
+    """A failed fetch must be visible to the caller, not swallowed.
+
+    __main__ runs download.py as a subprocess with check=True and logs the
+    failure. That branch was unreachable while every error was caught here and
+    the process still exited 0.
+    """
+    monkeypatch.setattr(download, "is_valid_file", lambda *_a: False)
+    monkeypatch.setattr(
+        download, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("no net"))
+    )
+    assert ensure_model_exists(tmp_path, download.DEFAULT_URL) is False
+
+
+def test_returns_true_when_every_file_is_present(tmp_path, monkeypatch):
+    monkeypatch.setattr(download, "is_valid_file", lambda *_a: True)
+    assert ensure_model_exists(tmp_path, download.DEFAULT_URL) is True
+
+
+def test_download_is_atomic_via_a_sidecar(tmp_path, monkeypatch):
+    """Nothing may appear at the final path until the transfer completes.
+
+    Both model files carry md5=None, so is_valid_file's only real gate is
+    "bigger than 1024 bytes". Writing in place meant a process killed midway
+    left a truncated model that satisfied that gate on every later run and was
+    never re-fetched. Asserting mid-transfer state is what distinguishes the
+    sidecar from an in-place write; an exception-based test does not, because
+    the except handler unlinks either way.
+    """
+    seen = []
+
+    class Observing(io.RawIOBase):
+        def readinto(self, buffer):
+            seen.append(
+                {
+                    "finals": sorted(
+                        q.name
+                        for q in tmp_path.glob("glados.onnx*")
+                        if not q.name.endswith(".part")
+                    ),
+                    "parts": sorted(q.name for q in tmp_path.glob("*.part")),
+                }
+            )
+            return 0  # EOF, ending the copy
+
+    monkeypatch.setattr(download, "is_valid_file", lambda *_a: False)
+    monkeypatch.setattr(
+        download, "urlopen", lambda *a, **kw: contextlib.closing(Observing())
+    )
+
+    ensure_model_exists(tmp_path, download.DEFAULT_URL)
+
+    # Both files are fetched; at no point during either transfer may a
+    # partially written file sit at the final path.
+    assert len(seen) == 2
+    assert seen[0]["finals"] == [], "final path was written in place"
+    assert seen[0]["parts"] == ["glados.onnx.part"]
+    assert seen[1]["parts"] == ["glados.onnx.json.part"]

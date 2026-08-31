@@ -51,6 +51,14 @@ def test_run_calls_asyncio_run():
     with patch("asyncio.run") as run_mock:
         mainmod.run()
         run_mock.assert_called_once()
+        # run() builds the coroutine eagerly and hands it to asyncio.run, which
+        # is mocked here -- so nothing ever awaits it. Assert it is the right
+        # one, then close it; otherwise it is collected at an arbitrary later
+        # point and pytest reports "coroutine 'main' was never awaited" against
+        # whichever test happens to be running then.
+        (coro,) = run_mock.call_args.args
+        assert coro.__name__ == "main"
+        coro.close()
 
 
 # ============================================================
@@ -72,22 +80,8 @@ async def test_main_happy_path(monkeypatch):
         ],
     )
 
-    # -----------------------------------
-    # Mock subprocess.run for model download
-    # -----------------------------------
-    mock_subproc = MagicMock()
-    monkeypatch.setattr(mainmod.subprocess, "run", mock_subproc)
-
-    # -----------------------------------
-    # Mock TTSRunner
-    # -----------------------------------
     mock_tts = MagicMock()
-    monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
-
-    # Mock rnn flatten_parameters call
-    mock_tts.glados.rnn.flatten_parameters = MagicMock()
-
-    # -----------------------------------
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock(return_value=mock_tts))
 
     # -----------------------------------
     # Mock GladosProcessManager
@@ -114,78 +108,8 @@ async def test_main_happy_path(monkeypatch):
     # -----------------------------------
     await mainmod.main()
 
-    # Ensure model download was triggered
-    assert mock_subproc.called
-
     # Ensure server was started
     mock_server.run.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_main_download_failure(monkeypatch, capsys):
-    """Simulate a model download failure and ensure error is logged."""
-    monkeypatch.setattr(sys, "argv", ["prog", "--models-dir=/tmp/models"])
-
-    # subprocess.run → raise CalledProcessError
-    def raise_err(*a, **k):
-        raise mainmod.subprocess.CalledProcessError(1, "cmd")
-
-    monkeypatch.setattr(mainmod.subprocess, "run", raise_err)
-
-    # Mock the minimum objects needed for main() to proceed
-    monkeypatch.setattr(mainmod, "TTSRunner", MagicMock())
-
-    mock_proc_mgr = MagicMock()
-    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
-    monkeypatch.setattr(
-        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
-    )
-
-    mock_server = MagicMock()
-    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
-    monkeypatch.setattr(
-        mainmod.AsyncServer, "from_uri", MagicMock(return_value=mock_server)
-    )
-
-    await mainmod.main()
-
-    captured = capsys.readouterr()
-    assert "Model download failed" in captured.out
-
-
-@pytest.mark.asyncio
-async def test_main_rnn_flatten_failure(monkeypatch):
-    """flatten_parameters should be ignored if it throws."""
-    monkeypatch.setattr(sys, "argv", ["prog"])
-
-    # Mock subprocess
-    monkeypatch.setattr(mainmod.subprocess, "run", MagicMock())
-
-    # TTSRunner mock where flatten_parameters throws
-    mock_tts = MagicMock()
-
-    def raise_flatten():
-        raise RuntimeError("fail")
-
-    mock_tts.glados.rnn.flatten_parameters = raise_flatten
-    monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
-
-    # Other required mocks
-
-    mock_proc_mgr = MagicMock()
-    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
-    monkeypatch.setattr(
-        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
-    )
-
-    mock_server = MagicMock()
-    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
-    monkeypatch.setattr(
-        mainmod.AsyncServer, "from_uri", MagicMock(return_value=mock_server)
-    )
-
-    # Should not raise
-    await mainmod.main()
 
 
 @pytest.mark.asyncio
@@ -195,12 +119,8 @@ async def test_main_server_run_exception(monkeypatch, capsys):
     # Fake CLI args
     monkeypatch.setattr(sys, "argv", ["prog"])
 
-    # Mock subprocess.run (model downloader)
-    monkeypatch.setattr(mainmod.subprocess, "run", MagicMock())
-
-    # Mock TTSRunner
     mock_tts = MagicMock()
-    monkeypatch.setattr(mainmod, "TTSRunner", MagicMock(return_value=mock_tts))
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock(return_value=mock_tts))
 
     # Mock process manager
     mock_proc_mgr = MagicMock()
@@ -227,3 +147,120 @@ async def test_main_server_run_exception(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "An error occurred while running the server" in captured.out
     assert "boom" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_warmup_completes_before_the_server_binds(monkeypatch):
+    """Warmup is synchronous, and the ordering it implies is the point.
+
+    This test used to assert the opposite - that warmup was handed to a daemon
+    thread so the server could bind first. That never bought anything: the
+    TensorRT engines are built inside PiperTTSRunner(), which has already
+    returned by the time warmup runs, so the thread deferred a 0.03s smoke test
+    while the ~60s cold build stayed on the startup path regardless.
+
+    What matters is that warmup has run before the server accepts a connection,
+    so the first request never races an unproven session.
+    """
+    monkeypatch.setattr(sys, "argv", ["prog"])
+    mock_tts = MagicMock()
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock(return_value=mock_tts))
+
+    order = []
+    mock_tts.warmup.side_effect = lambda: order.append("warmup")
+
+    mock_proc_mgr = MagicMock()
+    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
+    )
+    mock_server = MagicMock()
+    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
+
+    def from_uri(*_args, **_kwargs):
+        order.append("bind")
+        return mock_server
+
+    monkeypatch.setattr(mainmod.AsyncServer, "from_uri", from_uri)
+
+    await mainmod.main()
+
+    mock_tts.warmup.assert_called_once()
+    assert order == ["warmup", "bind"], (
+        "warmup must finish before the server binds, so no request can arrive "
+        "against an unproven session"
+    )
+
+
+def test_warmup_failure_does_not_kill_the_server(caplog):
+    """A failed smoke test is logged, not fatal: other providers still work."""
+    runner = MagicMock()
+    runner.warmup.side_effect = RuntimeError("no engine")
+    with caplog.at_level(logging.ERROR):
+        mainmod._warmup(runner)
+    assert "warmup failed" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_advertised_voice_name_follows_the_loaded_voice(monkeypatch):
+    """A hardcoded name would drift from --voice-name and confuse clients."""
+    monkeypatch.setattr(sys, "argv", ["prog", "--voice-name=testvoice"])
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock())
+
+    captured = {}
+    real_info = mainmod.Info
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return real_info(**kwargs)
+
+    monkeypatch.setattr(mainmod, "Info", capture)
+
+    mock_proc_mgr = MagicMock()
+    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
+    )
+    mock_server = MagicMock()
+    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod.AsyncServer, "from_uri", MagicMock(return_value=mock_server)
+    )
+
+    await mainmod.main()
+
+    voices = captured["tts"][0].voices
+    assert [v.name for v in voices] == ["testvoice"]
+
+
+@pytest.mark.asyncio
+async def test_attribution_credits_this_project(monkeypatch):
+    """The VITS voice is trained here, not by the ForwardTacotron project."""
+    monkeypatch.setattr(sys, "argv", ["prog"])
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock())
+
+    captured = {}
+    real_info = mainmod.Info
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return real_info(**kwargs)
+
+    monkeypatch.setattr(mainmod, "Info", capture)
+
+    mock_proc_mgr = MagicMock()
+    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
+    )
+    mock_server = MagicMock()
+    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod.AsyncServer, "from_uri", MagicMock(return_value=mock_server)
+    )
+
+    await mainmod.main()
+
+    attribution = captured["tts"][0].voices[0].attribution
+    assert "R2D2FISH" not in attribution.name
+    assert "wyoming-glados" in attribution.url

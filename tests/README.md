@@ -75,7 +75,7 @@ ruff format --check .
 
 Some tests require the `regex` module which is a production dependency. The test suite is designed to gracefully skip tests that require unavailable dependencies.
 
-The tests mock heavy dependencies like `wyoming`, `gladostts`, and CUDA-related libraries to allow testing without a full GPU setup.
+The tests mock heavy dependencies like `wyoming` and the ONNX Runtime session so they run without a GPU.
 
 ## Continuous Integration
 

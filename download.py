@@ -7,10 +7,12 @@ import argparse
 import hashlib
 import logging
 import shutil
+import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 from urllib.parse import quote, urlsplit, urlunsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 class ModelFile(TypedDict):
@@ -20,10 +22,12 @@ class ModelFile(TypedDict):
     md5: str | None
 
 
+# `latest` rather than a pinned tag so publishing a retrained voice does not
+# also require a code change here. Override with --url to pin a release.
 DEFAULT_URL = (
-    "https://github.com/Jonah-May-OSS/glados-tts/releases/download/1.0.0/{file}"
+    "https://github.com/Jonah-May-OSS/wyoming-glados/releases/latest/download/{file}"
 )
-DEFAULT_MODEL_DIR = "./gladostts/models"
+DEFAULT_MODEL_DIR = "./models"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +46,26 @@ def get_file_hash(path: Path, bytes_per_chunk: int = 8192) -> str:
         for chunk in iter(lambda: file.read(bytes_per_chunk), b""):
             md5_hash.update(chunk)
     return md5_hash.hexdigest()
+
+
+def remote_size(url: str, opener: Callable[..., Any] = urlopen) -> int | None:
+    """Content-Length the server reports for `url`, or None if unavailable.
+
+    Used to decide whether an unversioned file on disk is still current. A HEAD
+    keeps this cheap: no body is transferred, so the common case (nothing has
+    changed) costs one round trip.
+    """
+    try:
+        request = Request(_quote_url(url), method="HEAD")
+        with opener(request) as response:
+            length = response.headers.get("Content-Length")
+        return int(length) if length is not None else None
+    except Exception:
+        # Offline, or the host does not answer HEAD. Callers treat None as
+        # "cannot tell", and keep whatever is on disk: a missing network must
+        # not delete a working voice.
+        _LOGGER.debug("Could not determine remote size for %s", url, exc_info=True)
+        return None
 
 
 def is_valid_file(file_path: Path, expected_md5: str | None) -> bool:
@@ -69,61 +93,98 @@ def is_valid_file(file_path: Path, expected_md5: str | None) -> bool:
     return True
 
 
-def ensure_model_exists(download_dir: Path, base_url: str):
-    """Ensure that all required model files are present and valid."""
+def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
+    """Ensure that all required model files are present and valid.
+
+    Returns False if any file is still missing or invalid afterwards. __main__
+    runs this as a subprocess with check=True, so swallowing failures here made
+    that error branch unreachable: a download that failed outright still exited
+    0 and was logged as "downloaded (or already up-to-date)", with the real
+    problem surfacing later as a confusing model-not-found at session load.
+    """
     # List of model files and their expected MD5 checksums
 
+    # The VITS voice is two files: the ONNX graph and the config carrying the
+    # phoneme_id_map the runtime needs to turn phonemes into model inputs.
+    # Checksums are left unset until the voice is published to a release; a
+    # None checksum only skips verification, it still requires the file.
     model_files: list[ModelFile] = [
         {
-            "filename": "glados-new.pt",
-            "md5": "d6945ffd96ee0619d0d49a581b5b83ad",
-        },
-        # NOTE: tacotron-trt.ts is intentionally not downloaded anymore. The
-        # released file is a mislabeled copy of glados-new.pt (Tacotron never
-        # actually ran through TensorRT); TTSRunner deletes local copies.
-        {
-            "filename": "en_us_cmudict_ipa_forward.pt",
-            "md5": "33887f7f579f010ce4463534306120b0",
+            "filename": "glados.onnx",
+            "md5": None,
         },
         {
-            "filename": "emb/glados_p2.pt",
-            "md5": "ff2ad1438e9acb1f8e8607864c239ffc",
-        },
-        {
-            "filename": "vocoder-gpu.pt",
-            "md5": "d35c13c01d2cacd348aa216649bbfac3",
-        },
-        {
-            "filename": "vocoder-trt.ts",
-            # Allow locally rebuilt TRT engines to persist across restarts.
+            "filename": "glados.onnx.json",
             "md5": None,
         },
     ]
 
+    all_present = True
     for model in model_files:
         model_file = model["filename"]
         model_file_path = download_dir / model_file
         model_file_path.parent.mkdir(parents=True, exist_ok=True)
-        model_url = ""
+
+        model_url = base_url.format(file=model_file.rsplit("/", maxsplit=1)[-1])
 
         if is_valid_file(model_file_path, model["md5"]):
-            _LOGGER.info("File %s is valid.", model_file_path)
-            continue  # No need to download
+            # A checksum settles it. Without one, "exists and over 1024 bytes"
+            # is not the same as "current": DEFAULT_URL points at
+            # releases/latest, so republishing a retrained voice changes what
+            # that URL serves while the stale file on disk keeps passing. Every
+            # existing deployment would then stay on the old voice forever,
+            # which is the opposite of what pointing at `latest` is for.
+            #
+            # Compare sizes to catch that. It is weaker than a checksum - a
+            # retrained voice that happens to be byte-identical in length is
+            # not detected - but it needs no published hash, and it fails safe:
+            # remote_size returns None when offline, and the file is kept.
+            if model["md5"] is not None:
+                _LOGGER.info("File %s is valid.", model_file_path)
+                continue
+
+            try:
+                local_size = model_file_path.stat().st_size
+            except OSError:
+                # is_valid_file vouched for this file; if it cannot be stat'd
+                # there is nothing to compare a remote size against, so take
+                # that verdict rather than re-downloading on a stat error.
+                _LOGGER.info("File %s is valid.", model_file_path)
+                continue
+
+            expected_size = remote_size(model_url)
+            if expected_size is None or expected_size == local_size:
+                _LOGGER.info("File %s is valid.", model_file_path)
+                continue
+
+            _LOGGER.info(
+                "File %s is %d bytes but %s now serves %d; re-downloading.",
+                model_file_path,
+                local_size,
+                model_url,
+                expected_size,
+            )
         # Remove invalid or incomplete file
 
         if model_file_path.exists():
             model_file_path.unlink()
         # Download the file
 
+        part_path = model_file_path.with_name(model_file_path.name + ".part")
         try:
-            filename = model_file.rsplit("/", maxsplit=1)[-1]
-            model_url = base_url.format(file=filename)
             _LOGGER.info("Downloading %s to %s", model_url, model_file_path)
+            # Download to a sidecar and rename only once complete. Both
+            # files carry md5=None, so is_valid_file's only real gate is
+            # "larger than 1024 bytes" - a download killed midway would leave a
+            # truncated model that passes that check on every later run and is
+            # never re-fetched. fetch.py guards the same failure for wiki audio
+            # with is_wav_complete; this is the same idea, done atomically.
             with (
                 urlopen(_quote_url(model_url)) as response,
-                open(model_file_path, "wb") as out_file,
+                open(part_path, "wb") as out_file,
             ):
                 shutil.copyfileobj(response, out_file)
+            part_path.replace(model_file_path)
             _LOGGER.info("Downloaded %s", model_file_path)
 
             # Verify MD5 hash after download
@@ -136,6 +197,7 @@ def ensure_model_exists(download_dir: Path, base_url: str):
                 )
                 if model_file_path.exists():
                     model_file_path.unlink()
+                all_present = False
         except Exception:
             _LOGGER.exception(
                 "Failed to download %s from %s",
@@ -145,6 +207,10 @@ def ensure_model_exists(download_dir: Path, base_url: str):
             if model_file_path.exists():
                 model_file_path.unlink()  # pragma: no cover
                 # Remove incomplete file
+            part_path.unlink(missing_ok=True)
+            all_present = False
+
+    return all_present
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -170,4 +236,6 @@ if __name__ == "__main__":  # pragma: no cover
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
 
-    ensure_model_exists(args.model_dir, args.url)
+    if not ensure_model_exists(args.model_dir, args.url):
+        _LOGGER.error("One or more voice files are missing or invalid.")
+        sys.exit(1)

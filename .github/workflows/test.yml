@@ -54,8 +54,6 @@ jobs:
       # 1. Checkout the repository code
       - name: Checkout Code
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
-        with:
-          submodules: recursive
 
       # gcc/g++, netcat-openbsd and virtualenv are baked into the custom runner
       # image (local/gpu-runner), so no in-job apt/pip installs are needed.
@@ -67,9 +65,9 @@ jobs:
         with:
           python-version: '3.13'
 
-      # No CUDA toolkit install: every dependency is a prebuilt wheel (torch,
-      # torch-tensorrt, torchvision, scipy, ...) with no source compilation, so
-      # nvcc isn't needed. CUDA runtime comes from the wheels + the self-hosted
+      # No CUDA toolkit install: every dependency is a prebuilt wheel
+      # (onnxruntime-gpu, tensorrt, ...) with no source compilation, so nvcc
+      # isn't needed. CUDA runtime comes from the wheels + the self-hosted
       # runner's nvidia runtime. Installing the toolkit per run wrote ~4GB to
       # local disk and contributed to a cluster etcd incident.
 
@@ -82,7 +80,7 @@ jobs:
           if [ -n "$RUNNER_CACHE" ]; then
             MODELS_DIR="$RUNNER_CACHE/glados/models"
           else
-            MODELS_DIR="$PWD/gladostts/models"
+            MODELS_DIR="$PWD/models"
           fi
           mkdir -p "$MODELS_DIR"
           echo "MODELS_DIR=$MODELS_DIR" >> "$GITHUB_ENV"
@@ -92,8 +90,11 @@ jobs:
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
-          python3 download.py --model-dir "$MODELS_DIR"
           pip install -r requirements.txt
+          # --no-deps: piper-tts requires the CPU-only onnxruntime, which owns
+          # the same module as onnxruntime-gpu and would silently replace it.
+          pip install --no-deps -r requirements-piper.txt
+          python3 download.py --model-dir "$MODELS_DIR"
 
       - name: Start GLaDOS TTS Server and Test Listening
         run: |

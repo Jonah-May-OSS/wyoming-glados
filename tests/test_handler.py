@@ -583,3 +583,53 @@ class TestUnknownEvents:
         assert result is True
         # Should not have called write_event
         handler.write_event.assert_not_called()
+
+
+class TestPrefetchBound:
+    """The maxsize=1 sentence queue is what keeps GPU work bounded."""
+
+    @staticmethod
+    def _counting_process(release):
+        live = {"now": 0, "peak": 0}
+
+        async def run_tts(*_args, **_kwargs):
+            live["now"] += 1
+            live["peak"] = max(live["peak"], live["now"])
+            try:
+                await release.wait()
+                yield b"pcm", 22050, 2, 1
+            finally:
+                live["now"] -= 1
+
+        process = MagicMock(spec=GladosProcess)
+        process.run_tts = run_tts
+        return process, live
+
+    async def test_prefetch_is_bounded_at_three(self, handler):
+        """One draining, one queued, one blocked on put - all synthesizing.
+
+        A sentence being drained has NOT finished synthesizing, so the ceiling
+        is three, not the two you get from counting queue slots.
+        """
+        release = asyncio.Event()
+        process, live = self._counting_process(release)
+        handler.process_manager.get_process = AsyncMock(return_value=process)
+
+        await _call_private_async(handler, "_start_pipeline")
+        feed = asyncio.create_task(
+            _feed_sentences(handler, [f"s{i}." for i in range(8)])
+        )
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+        assert live["peak"] == 3, f"prefetch ceiling moved to {live['peak']}"
+
+        release.set()
+        feed.cancel()
+        await _call_private_async(handler, "_cancel_pipeline")
+
+
+async def _feed_sentences(handler, sentences):
+    """Enqueue sequentially, as the stream-chunk handler does."""
+    for sentence in sentences:
+        await _call_private_async(handler, "_enqueue_sentence", sentence)

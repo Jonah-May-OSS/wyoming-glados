@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
-        with:
-          submodules: recursive
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -26,7 +24,13 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
+          # requirements-dataset.txt too: pyright's include covers
+          # dataset_tools, which imports scipy. Without it every run fails
+          # on reportMissingImports.
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt \n            -r requirements-dataset.txt
+          # --no-deps: piper-tts requires the CPU-only onnxruntime, which owns
+          # the same module as onnxruntime-gpu and would replace it.
+          .venv/bin/python -m pip install --no-deps -r requirements-piper.txt
 
       - name: Run pyright
         run: .venv/bin/pyright
