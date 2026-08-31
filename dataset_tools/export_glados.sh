@@ -77,10 +77,24 @@ elif [ "${1:-}" = "last" ]; then
   CKPT="$(find "$LOGS_DIR" -name "last.ckpt" -printf '%T@ %p\n' \
     | sort -rn | head -1 | cut -d' ' -f2-)"
 else
-  # Filenames look like epoch=12-val_mel=0.4123.ckpt; sort by the val_mel field.
-  CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mel=*.ckpt" \
-    | sed 's/.*val_mel=\([0-9.]*\)\.ckpt/\1 &/' \
+  # Select by val_mcd: the metric train_glados.sh monitors (mode="min",
+  # save_top_k=2) and calls "the ladder to pick a release from".
+  #
+  # This sorted by val_mel, which that same script documents as the WRONG
+  # selector - val_mel and train_mel drifted up together while loss_d nearly
+  # doubled, so the best-sounding checkpoint is often not the lowest-val_mel
+  # one. Worse, the old glob could not match an epoch=...-val_mcd=... name at
+  # all, so the val_mcd checkpoints were unreachable without an explicit path.
+  #
+  # val_mel remains the fallback for runs trained before val_mcd was added.
+  CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mcd=*.ckpt" \
+    | sed 's/.*val_mcd=\([0-9.]*\)\.ckpt/\1 &/' \
     | sort -n | head -1 | cut -d' ' -f2-)"
+  if [ -z "${CKPT:-}" ]; then
+    CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mel=*.ckpt" \
+      | sed 's/.*val_mel=\([0-9.]*\)\.ckpt/\1 &/' \
+      | sort -n | head -1 | cut -d' ' -f2-)"
+  fi
 fi
 
 if [ -z "${CKPT:-}" ] || [ ! -f "$CKPT" ]; then

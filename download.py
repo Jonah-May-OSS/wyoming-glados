@@ -48,7 +48,7 @@ def get_file_hash(path: Path, bytes_per_chunk: int = 8192) -> str:
     return md5_hash.hexdigest()
 
 
-def remote_size(url: str, opener: Callable[..., Any] = urlopen) -> int | None:
+def remote_size(url: str, opener: Callable[..., Any] | None = None) -> int | None:
     """Content-Length the server reports for `url`, or None if unavailable.
 
     Used to decide whether an unversioned file on disk is still current. A HEAD
@@ -56,8 +56,12 @@ def remote_size(url: str, opener: Callable[..., Any] = urlopen) -> int | None:
     changed) costs one round trip.
     """
     try:
+        # Resolved here, not as a default argument: a default binds urlopen at
+        # def time, which silently escapes patch("download.urlopen") and lets
+        # tests make real network calls while asserting they made none.
+        open_url = urlopen if opener is None else opener
         request = Request(_quote_url(url), method="HEAD")
-        with opener(request) as response:
+        with open_url(request) as response:
             length = response.headers.get("Content-Length")
         return int(length) if length is not None else None
     except Exception:
@@ -93,7 +97,9 @@ def is_valid_file(file_path: Path, expected_md5: str | None) -> bool:
     return True
 
 
-def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
+def ensure_model_exists(
+    download_dir: Path, base_url: str, voice_name: str = "glados"
+) -> bool:
     """Ensure that all required model files are present and valid.
 
     Returns False if any file is still missing or invalid afterwards. __main__
@@ -108,13 +114,18 @@ def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
     # phoneme_id_map the runtime needs to turn phonemes into model inputs.
     # Checksums are left unset until the voice is published to a release; a
     # None checksum only skips verification, it still requires the file.
+    # Derived from voice_name, not hardcoded: __main__.py exposes --voice-name
+    # and VOICE_NAME, and used to invoke this script without passing either. A
+    # non-default voice therefore downloaded glados.onnx, exited 0, and left
+    # PiperTTSRunner to raise FileNotFoundError for a file nothing had tried to
+    # fetch - a traceback that blamed the wrong thing entirely.
     model_files: list[ModelFile] = [
         {
-            "filename": "glados.onnx",
+            "filename": f"{voice_name}.onnx",
             "md5": None,
         },
         {
-            "filename": "glados.onnx.json",
+            "filename": f"{voice_name}.onnx.json",
             "md5": None,
         },
     ]
@@ -126,6 +137,7 @@ def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
         model_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         model_url = base_url.format(file=model_file.rsplit("/", maxsplit=1)[-1])
+        stale_but_usable = False
 
         if is_valid_file(model_file_path, model["md5"]):
             # A checksum settles it. Without one, "exists and over 1024 bytes"
@@ -164,9 +176,17 @@ def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
                 model_url,
                 expected_size,
             )
-        # Remove invalid or incomplete file
+            stale_but_usable = True
 
-        if model_file_path.exists():
+        # An invalid file must go: leaving it would let __main__'s "continue
+        # with the existing voice" fallback serve something corrupt.
+        #
+        # A valid-but-stale one is deliberately kept. The sidecar rename below
+        # replaces it atomically, so deleting it first buys nothing and costs
+        # everything if the re-download then fails - a transient network error
+        # while refreshing a working voice would leave the deployment with no
+        # voice at all.
+        if not stale_but_usable and model_file_path.exists():
             model_file_path.unlink()
         # Download the file
 
@@ -183,7 +203,28 @@ def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
                 urlopen(_quote_url(model_url)) as response,
                 open(part_path, "wb") as out_file,
             ):
+                headers = getattr(response, "headers", None)
+                declared = headers.get("Content-Length") if headers else None
                 shutil.copyfileobj(response, out_file)
+
+            # With md5=None the only gate downstream is "larger than 1024
+            # bytes", which a truncated transfer or an error page served with
+            # HTTP 200 can both satisfy. The response already said how many
+            # bytes to expect, so check them before the rename makes the file
+            # look authoritative.
+            try:
+                expected_bytes = None if declared is None else int(declared)
+            except (TypeError, ValueError):
+                # A server that omits or malforms Content-Length gives us
+                # nothing to check against; that is not itself a failure.
+                expected_bytes = None
+
+            written = part_path.stat().st_size
+            if expected_bytes is not None and written != expected_bytes:
+                raise OSError(
+                    f"{model_url}: expected {expected_bytes} bytes, received {written}"
+                )
+
             part_path.replace(model_file_path)
             _LOGGER.info("Downloaded %s", model_file_path)
 
@@ -204,9 +245,9 @@ def ensure_model_exists(download_dir: Path, base_url: str) -> bool:
                 model_file_path,
                 _quote_url(model_url),
             )
-            if model_file_path.exists():
-                model_file_path.unlink()  # pragma: no cover
-                # Remove incomplete file
+            # Only the sidecar is ever partial; model_file_path is written
+            # solely by the atomic rename. Deleting it here would throw away
+            # the very file the stale-but-usable path is preserving.
             part_path.unlink(missing_ok=True)
             all_present = False
 
@@ -220,6 +261,12 @@ if __name__ == "__main__":  # pragma: no cover
         type=Path,
         default=Path(DEFAULT_MODEL_DIR),
         help="Directory for the models",
+    )
+    parser.add_argument(
+        "--voice-name",
+        type=str,
+        default="glados",
+        help="Voice to fetch; selects <voice-name>.onnx and .onnx.json",
     )
     parser.add_argument(
         "--url",
@@ -236,6 +283,6 @@ if __name__ == "__main__":  # pragma: no cover
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
 
-    if not ensure_model_exists(args.model_dir, args.url):
+    if not ensure_model_exists(args.model_dir, args.url, args.voice_name):
         _LOGGER.error("One or more voice files are missing or invalid.")
         sys.exit(1)

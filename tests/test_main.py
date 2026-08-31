@@ -66,6 +66,110 @@ def test_run_calls_asyncio_run():
 # ============================================================
 
 
+@pytest.fixture(autouse=True)
+def _no_real_download(monkeypatch):
+    """Stop main() shelling out to download.py for real.
+
+    Without this, every main() test spawned an actual
+    `python download.py --model-dir ...` subprocess: real network access, real
+    writes to whatever --models-dir the test passed, and a multi-second delay.
+    It also made the download-failure branch untestable, since a genuinely
+    failing subprocess was indistinguishable from the behaviour under test.
+    """
+    monkeypatch.setattr(
+        mainmod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0))
+    )
+
+
+def _stub_serving(monkeypatch):
+    """Mock out everything main() needs after the download step."""
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock(return_value=MagicMock()))
+    proc_mgr = MagicMock()
+    # side_effect, not return_value: return_value builds ONE coroutine and
+    # hands the same object to every call, so a second call awaits an already
+    # consumed coroutine and the first leaks a "never awaited" warning.
+    proc_mgr.get_process = MagicMock(side_effect=lambda *a, **k: asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod, "GladosProcessManager", MagicMock(return_value=proc_mgr)
+    )
+    server = MagicMock()
+    server.run = MagicMock(side_effect=lambda *a, **k: asyncio.sleep(0))
+    monkeypatch.setattr(mainmod.AsyncServer, "from_uri", MagicMock(return_value=server))
+    return server
+
+
+@pytest.mark.asyncio
+async def test_exits_when_the_download_fails_and_no_voice_is_present(
+    monkeypatch, tmp_path
+):
+    """No voice on disk and no download means there is nothing to serve.
+
+    Continuing would raise FileNotFoundError out of PiperTTSRunner, reporting a
+    missing file rather than the download failure that caused it.
+    """
+    monkeypatch.setattr(
+        sys, "argv", ["prog", f"--models-dir={tmp_path}", "--voice-name=glados"]
+    )
+    monkeypatch.setattr(
+        mainmod.subprocess,
+        "run",
+        MagicMock(side_effect=mainmod.subprocess.CalledProcessError(1, "download.py")),
+    )
+    _stub_serving(monkeypatch)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await mainmod.main()
+    assert excinfo.value.code == 1
+
+
+@pytest.mark.asyncio
+async def test_exits_when_only_half_the_voice_is_present(monkeypatch, tmp_path):
+    """A graph with no config is not a usable voice.
+
+    _load reads the .json unguarded, so proceeding here dies with a bare
+    traceback about a missing file - the failure this branch prevents.
+    """
+    (tmp_path / "glados.onnx").write_bytes(b"0" * 2048)  # config never arrived
+    monkeypatch.setattr(
+        sys, "argv", ["prog", f"--models-dir={tmp_path}", "--voice-name=glados"]
+    )
+    monkeypatch.setattr(
+        mainmod.subprocess,
+        "run",
+        MagicMock(side_effect=mainmod.subprocess.CalledProcessError(1, "download.py")),
+    )
+    _stub_serving(monkeypatch)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await mainmod.main()
+    assert excinfo.value.code == 1
+
+
+@pytest.mark.asyncio
+async def test_serves_the_existing_voice_when_the_download_fails(monkeypatch, tmp_path):
+    """A failed refresh must not take a working offline deployment down."""
+    # Both files: the runner needs the config for the phoneme_id_map, so a
+    # voice is only usable when the graph AND the .json are present.
+    (tmp_path / "glados.onnx").write_bytes(b"0" * 2048)
+    (tmp_path / "glados.onnx.json").write_text("{}")
+    monkeypatch.setattr(
+        sys, "argv", ["prog", f"--models-dir={tmp_path}", "--voice-name=glados"]
+    )
+    monkeypatch.setattr(
+        mainmod.subprocess,
+        "run",
+        MagicMock(side_effect=mainmod.subprocess.CalledProcessError(1, "download.py")),
+    )
+    server = _stub_serving(monkeypatch)
+
+    # No SystemExit, and the server still comes up. Asserted on behaviour
+    # rather than log text: main() installs its own logging handler, so the
+    # warning never reaches caplog.
+    await mainmod.main()
+
+    server.run.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_main_happy_path(monkeypatch):
     """Ensure main() hits the server.start() logic without errors."""

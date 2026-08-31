@@ -67,7 +67,10 @@ class GladosProcess:
                 item = await queue.get()
                 if item is _stream_end:
                     break
-                yield (item, SAMPLE_RATE, SAMPLE_WIDTH, CHANNELS)
+                # The voice config's rate, not the module constant: a
+                # 16 kHz voice announced as 22050 plays ~1.38x too fast.
+                rate = getattr(self.runner, "sample_rate", SAMPLE_RATE)
+                yield (item, rate, SAMPLE_WIDTH, CHANNELS)
             # Surface any inference error raised in the worker thread.
             await future
         except Exception as e:

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from piper_runtime.runner import (
+    _MISSING_PROFILE_MARKER,
     BUILDER_OPTIMIZATION_LEVEL,
     DEFAULT_NOISE_SCALE,
     DEFAULT_NOISE_W,
@@ -230,6 +231,40 @@ class TestConstruction:
         with caplog.at_level(logging.WARNING, logger="piper_runtime.runner"):
             runner.synthesize_ids([1] * 32)
         assert "shape profile" not in caplog.text
+
+
+class TestPhonemizeThreadSafety:
+    """espeak-ng holds its state in C globals; the pipeline runs three at once."""
+
+    def test_phonemize_is_serialised(self):
+        import threading
+        import time
+
+        peak = []
+        active = 0
+        guard = threading.Lock()
+
+        class RacyPhonemizer:
+            def phonemize(self, _voice, _text):
+                nonlocal active
+                with guard:
+                    active += 1
+                    peak.append(active)
+                time.sleep(0.01)  # widen the window a real espeak call has
+                with guard:
+                    active -= 1
+                return [["h"]]
+
+        runner = _runner(phonemizer=RacyPhonemizer())
+        threads = [
+            threading.Thread(target=runner.phonemize, args=("hello",)) for _ in range(4)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert max(peak) == 1, "two threads were inside espeak at once"
 
 
 class TestShapePassthrough:
@@ -556,6 +591,55 @@ class TestShapeProfiles:
 
     def test_unrelated_errors_yield_nothing(self):
         assert missing_profile_inputs("some other failure entirely") == []
+
+    def test_only_the_marker_line_is_parsed(self):
+        """ORT errors are multi-line; the trailing prose is not a tensor name."""
+        message = (
+            "Failed: "
+            + _MISSING_PROFILE_MARKER
+            + "/Range_output_0,/Unsqueeze_output_0"
+            + chr(10)
+            + " Please run shape inference on the model first."
+        )
+
+        names = missing_profile_inputs(message)
+
+        assert names == ["/Range_output_0", "/Unsqueeze_output_0"]
+
+    def test_an_accepted_probe_is_kept_not_discarded(self, tmp_path, monkeypatch):
+        """The probe IS a profile set, so accepting it must not yield None.
+
+        Regression: when TensorRT accepted the probe and asked for no further
+        inputs, `names` stayed empty and discovery returned None - throwing away
+        a working profile set and leaving the real session on implicit profiles,
+        which is the per-request engine rebuild the profiles exist to prevent.
+        """
+
+        class FakeOrt:
+            @staticmethod
+            def InferenceSession(*_args, **_kwargs):
+                return object()  # accepted: no exception, nothing demanded
+
+        monkeypatch.setattr("piper_runtime.runner.tensor_dims", lambda _p: {})
+        runner = _runner()
+
+        profiles = runner._trt_profiles(
+            FakeOrt, use_trt=True, cache_dir=tmp_path, timing_dir=tmp_path
+        )
+
+        assert profiles is not None, "an accepted probe must not be discarded"
+        assert profiles["trt_profile_min_shapes"] == f"input:1x{PROFILE_PHONEMES[0]}"
+        assert profiles["trt_profile_max_shapes"] == f"input:1x{PROFILE_PHONEMES[2]}"
+
+    def test_use_trt_false_still_returns_none(self, tmp_path):
+        """Without TensorRT there is nothing to profile."""
+        runner = _runner()
+        assert (
+            runner._trt_profiles(
+                object(), use_trt=False, cache_dir=tmp_path, timing_dir=tmp_path
+            )
+            is None
+        )
 
     def test_symbolic_dims_resolve_by_meaning(self):
         dims = {

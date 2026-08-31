@@ -47,6 +47,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -80,6 +81,7 @@ BUILDER_OPTIMIZATION_LEVEL = 2
 # VITS inference scales: [noise_scale, length_scale, noise_w].
 DEFAULT_NOISE_SCALE = 0.667
 DEFAULT_NOISE_W = 0.8
+DEFAULT_ESPEAK_VOICE = "en-us"
 
 _INT16_MAX = 32767.0
 
@@ -133,7 +135,13 @@ def missing_profile_inputs(message: str) -> list[str]:
     """
     if _MISSING_PROFILE_MARKER not in message:
         return []
-    tail = message.split(_MISSING_PROFILE_MARKER, 1)[1]
+    # Only the marker's own line. ONNX Runtime errors are multi-line - the
+    # caller logs splitlines()[0] for exactly that reason - so reading to the
+    # end of the message appends the following sentence to the last tensor
+    # name. strip() does not remove it, so that name matches nothing, the
+    # profile comes back empty, and the session falls back to rebuilding an
+    # engine per request.
+    tail = message.split(_MISSING_PROFILE_MARKER, 1)[1].splitlines()[0]
     return [name.strip() for name in tail.split(",") if name.strip()]
 
 
@@ -414,8 +422,28 @@ class PiperTTSRunner:
 
         self._phoneme_id_map = phoneme_id_map
         self._phonemizer = phonemizer
+        # espeak-ng keeps its translator and voice state in C globals, so two
+        # threads inside phonemize() interleave and corrupt each other's output.
+        # The server pipelines three syntheses at once (handler keeps one
+        # draining, one queued and one blocked on put) and runs each in the
+        # default executor, all sharing this one runner - so overlap is the
+        # steady state, not a rare race. Inference itself is thread-safe;
+        # ONNX Runtime sessions are. Only phonemization needs serialising.
+        self._phonemize_lock = threading.Lock()
         self.config: dict[str, Any] = {}
         self.session: Session | None = session
+
+        # Defaults matching the shipped voice. _load overwrites them from the
+        # voice config, which is the authority: a voice exported at a different
+        # sample rate, phonemized with a different espeak voice, or trained
+        # with different inference scales carries all of that in its .json, and
+        # hardcoding these meant such a voice was streamed at the wrong rate,
+        # phonemized against a language it was never trained on, or run with
+        # scales its author did not choose - none of it visible in the logs.
+        self.sample_rate = SAMPLE_RATE
+        self.espeak_voice = DEFAULT_ESPEAK_VOICE
+        self.noise_scale = DEFAULT_NOISE_SCALE
+        self.noise_w = DEFAULT_NOISE_W
 
         if self.session is None:
             self._load(use_trt=use_trt)
@@ -486,10 +514,17 @@ class PiperTTSRunner:
         # All three bounds are required to make validation fail loudly. Given
         # only a min, the provider logs "Profile shapes validation failed" and
         # silently falls back to implicit profiles, naming nothing.
+        # Derived from PROFILE_PHONEMES, not written out. These literals used
+        # to be throwaway - the probe existed only to make TensorRT name its
+        # missing inputs. The probe is now RETURNED as the live profile set
+        # when TensorRT accepts it, so its bounds are the bounds the engine is
+        # built for, and they must be the same ones synthesize_ids checks
+        # against. Hardcoding them meant widening PROFILE_PHONEMES would move
+        # the warning threshold while leaving the engine at 512.
         probe = {
-            "trt_profile_min_shapes": "input:1x8",
-            "trt_profile_opt_shapes": "input:1x128",
-            "trt_profile_max_shapes": "input:1x512",
+            "trt_profile_min_shapes": f"input:1x{PROFILE_PHONEMES[0]}",
+            "trt_profile_opt_shapes": f"input:1x{PROFILE_PHONEMES[1]}",
+            "trt_profile_max_shapes": f"input:1x{PROFILE_PHONEMES[2]}",
         }
         try:
             dims = tensor_dims(self.model_path)
@@ -500,12 +535,23 @@ class PiperTTSRunner:
             for _ in range(_PROFILE_DISCOVERY_ROUNDS):
                 candidate = probe
                 if names:
+                    # Prepend `input`. Rebuilding purely from the discovered
+                    # names dropped the profile the probe had already supplied
+                    # for `input`, so ONNX Runtime rejected the next round
+                    # complaining about it again - burning a discovery round
+                    # re-learning something already known, and risking the
+                    # `if not fresh` bail-out that abandons profiles entirely.
+                    profiled = ["input", *names]
                     candidate = {
-                        "trt_profile_min_shapes": profile_for(names, dims, lo_p, lo_f),
-                        "trt_profile_opt_shapes": profile_for(
-                            names, dims, opt_p, opt_f
+                        "trt_profile_min_shapes": profile_for(
+                            profiled, dims, lo_p, lo_f
                         ),
-                        "trt_profile_max_shapes": profile_for(names, dims, hi_p, hi_f),
+                        "trt_profile_opt_shapes": profile_for(
+                            profiled, dims, opt_p, opt_f
+                        ),
+                        "trt_profile_max_shapes": profile_for(
+                            profiled, dims, hi_p, hi_f
+                        ),
                     }
                     if not all(candidate.values()):
                         _LOGGER.warning(
@@ -545,8 +591,22 @@ class PiperTTSRunner:
                     continue
 
                 if not names:
-                    _LOGGER.debug("TensorRT asked for no shape profiles; skipping")
-                    return None
+                    # Reaching here means the probe was ACCEPTED, and the probe
+                    # is itself a profile set (input 1x8/1x128/1x512) - not an
+                    # empty one. So this is "TensorRT wanted no inputs beyond
+                    # `input`", not "TensorRT wants no profiles".
+                    #
+                    # Returning None here threw that working set away and left
+                    # the real session on implicit profiles, which is exactly
+                    # the per-request engine rebuild this discovery exists to
+                    # prevent (2939 ms per utterance against 9.9 ms). Keep it.
+                    _LOGGER.info(
+                        "TensorRT accepted the probe profile with no further "
+                        "inputs required (phonemes %d-%d)",
+                        lo_p,
+                        hi_p,
+                    )
+                    return candidate
                 _LOGGER.info(
                     "TensorRT shape profiles set for %d inputs "
                     "(phonemes %d-%d, decoder frames %d-%d)",
@@ -580,6 +640,14 @@ class PiperTTSRunner:
         # Kept so speaker names can be resolved against speaker_id_map.
         self.config = config
 
+        audio = config.get("audio") or {}
+        espeak = config.get("espeak") or {}
+        inference = config.get("inference") or {}
+        self.sample_rate = int(audio.get("sample_rate", SAMPLE_RATE))
+        self.espeak_voice = espeak.get("voice") or DEFAULT_ESPEAK_VOICE
+        self.noise_scale = float(inference.get("noise_scale", DEFAULT_NOISE_SCALE))
+        self.noise_w = float(inference.get("noise_w", DEFAULT_NOISE_W))
+
         cache_dir = engine_cache_dir(self.models_dir, self.model_path)
         cache_dir.mkdir(parents=True, exist_ok=True)
         timing_dir = cache_dir.parent
@@ -607,8 +675,13 @@ class PiperTTSRunner:
             self._phonemizer = EspeakPhonemizer()
 
     def phonemize(self, text: str) -> list[list[str]]:
-        """Split text into sentences of phonemes."""
-        return list(self._phonemizer.phonemize("en-us", text))
+        """Split text into sentences of phonemes.
+
+        Serialised: see the note on _phonemize_lock. The call is short next to
+        synthesis, so this costs little of the pipeline's overlap.
+        """
+        with self._phonemize_lock:
+            return list(self._phonemizer.phonemize(self.espeak_voice, text))
 
     def to_ids(self, phonemes: list[str]) -> list[int]:
         """Map one sentence of phonemes to model input ids."""
@@ -667,7 +740,9 @@ class PiperTTSRunner:
             "input_lengths": np.array([true_length], dtype=np.int64),
         }
         if self.wants_scales:
-            feed["scales"] = build_scales(alpha)
+            feed["scales"] = build_scales(
+                alpha, noise_scale=self.noise_scale, noise_w=self.noise_w
+            )
         if self.wants_sid:
             feed["sid"] = np.array([self.speaker_id], dtype=np.int64)
         audio = self.session.run(None, feed)[0]

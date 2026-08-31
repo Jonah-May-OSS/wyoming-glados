@@ -104,12 +104,91 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"0" * 2048)
 
+    # A HEAD is expected: the voice files carry md5=None, so "present and over
+    # 1024 bytes" cannot distinguish a current file from a stale one, and the
+    # URL points at releases/latest. The remote size is what settles it.
+    head = MagicMock()
+    head.headers = {"Content-Length": "2048"}
+    head.__enter__ = lambda self: self
+    head.__exit__ = lambda self, *exc: False
+
     with (
         patch("download.is_valid_file", return_value=True),
-        patch("download.urlopen") as urlopen_mock,
+        patch("download.urlopen", return_value=head) as urlopen_mock,
     ):
         ensure_model_exists(tmp_path, base_url)
-        urlopen_mock.assert_not_called()
+
+    # Probed, but nothing re-fetched: every call is a HEAD.
+    assert urlopen_mock.call_count == len(model_paths)
+    assert all(
+        call.args[0].get_method() == "HEAD" for call in urlopen_mock.call_args_list
+    )
+    for path in model_paths:
+        assert path.read_bytes() == b"0" * 2048
+
+
+def test_a_failed_refresh_keeps_the_working_voice(tmp_path):
+    """A transient network error must not leave the deployment with no voice.
+
+    The size check can route a perfectly good file into the re-download path.
+    If that download then fails, deleting the original first would take a
+    working offline deployment down - and __main__ would exit rather than
+    serve, because its fallback looks for exactly this file.
+    """
+    base_url = "https://example.com/{file}"
+    good = b"0" * 2048
+    model_paths = [tmp_path / "glados.onnx", tmp_path / "glados.onnx.json"]
+    for path in model_paths:
+        path.write_bytes(good)
+
+    def fake_urlopen(request_or_url, *_args, **_kwargs):
+        if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
+            response = MagicMock()
+            response.__enter__ = lambda self: self
+            response.__exit__ = lambda self, *exc: False
+            response.headers = {"Content-Length": "4096"}  # remote changed
+            return response
+        raise OSError("connection reset")  # the refresh fails
+
+    with (
+        patch("download.is_valid_file", return_value=True),
+        patch("download.urlopen", side_effect=fake_urlopen),
+    ):
+        assert ensure_model_exists(tmp_path, base_url) is False
+
+    for path in model_paths:
+        assert path.exists(), "the working voice must survive a failed refresh"
+        assert path.read_bytes() == good
+        assert not path.with_suffix(path.suffix + ".part").exists()
+
+
+def test_ensure_model_exists_refetches_when_the_remote_size_changed(tmp_path):
+    """A retrained voice republished to releases/latest must actually arrive."""
+    base_url = "https://example.com/{file}"
+    model_paths = [tmp_path / "glados.onnx", tmp_path / "glados.onnx.json"]
+    for path in model_paths:
+        path.write_bytes(b"0" * 2048)
+
+    body = b"1" * 4096
+
+    def fake_urlopen(request_or_url, *_args, **_kwargs):
+        response = MagicMock()
+        response.__enter__ = lambda self: self
+        response.__exit__ = lambda self, *exc: False
+        response.headers = {"Content-Length": str(len(body))}
+        if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
+            return response
+        response.read = MagicMock(side_effect=[body, b""])
+        return response
+
+    with (
+        patch("download.is_valid_file", return_value=True),
+        patch("download.urlopen", side_effect=fake_urlopen),
+    ):
+        ensure_model_exists(tmp_path, base_url)
+
+    for path in model_paths:
+        assert path.read_bytes() == body
 
 
 # ================================================================

@@ -13,7 +13,13 @@ no-docstring-rgx=^(_|test_|Test|mock_|pytest_|setup_|teardown_)
 max-args=10
 max-locals=25
 max-branches=15
-max-attributes=15
+# PiperTTSRunner carries one voice's entire runtime state: the two file
+# paths, the loaded config and the four values read out of it (sample rate,
+# espeak voice, noise_scale, noise_w), the session and its two capability
+# flags, the phonemizer and its lock, and the speaker id. Cohesive, and
+# splitting it into sub-objects would only add indirection between the config
+# and the code that reads it.
+max-attributes=18
 max-positional-arguments=7
 max-returns=10
 max-statements=70

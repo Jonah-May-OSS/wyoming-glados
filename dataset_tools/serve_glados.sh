@@ -22,8 +22,14 @@ MODELS_DIR="${MODELS_DIR:-$HOME/glados_models}"
 PORT="${PORT:-10201}"
 
 USE_TRT=1
+CUDA_ENV=""
 if [ "${1:-}" = "--cpu" ]; then
   USE_TRT=0
+  # Skipping LD_LIBRARY_PATH alone did not make this a CPU run: __main__.py has
+  # no --cpu flag, so the runner still asked for TensorRT and CUDA and simply
+  # found the libraries by other means. Hiding the GPU is what actually forces
+  # the CPU provider.
+  CUDA_ENV="CUDA_VISIBLE_DEVICES="
 fi
 
 # shellcheck disable=SC1091
@@ -50,7 +56,7 @@ export PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "Serving GLaDOS on tcp://0.0.0.0:$PORT (models: $MODELS_DIR)"
 echo "WSL IP: $(hostname -I | awk '{print $1}')"
-exec python3 __main__.py \
+exec env ${CUDA_ENV} python3 __main__.py \
   --voice-name glados \
   --models-dir "$MODELS_DIR" \
   --uri "tcp://0.0.0.0:$PORT" \

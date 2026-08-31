@@ -27,7 +27,7 @@ jobs:
           # requirements-dataset.txt too: pyright's include covers
           # dataset_tools, which imports scipy. Without it every run fails
           # on reportMissingImports.
-          .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt \n            -r requirements-dataset.txt
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-dataset.txt
           # --no-deps: piper-tts requires the CPU-only onnxruntime, which owns
           # the same module as onnxruntime-gpu and would replace it.
           .venv/bin/python -m pip install --no-deps -r requirements-piper.txt

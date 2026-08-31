@@ -141,6 +141,8 @@ async def main() -> None:
                 str(SCRIPT_DIR / "download.py"),
                 "--model-dir",
                 str(args.models_dir),
+                "--voice-name",
+                args.voice_name,
                 *(["--debug"] if args.debug else []),
             ],
             timeout=300,
@@ -154,6 +156,33 @@ async def main() -> None:
             else f"exit {e.returncode}"
         )
         logger.error("Voice model download failed (%s).", error_msg)
+
+        # Whether that is fatal depends on what is already on disk. Continuing
+        # with no voice at all means PiperTTSRunner below raises
+        # FileNotFoundError from _load, which surfaces as a traceback about a
+        # missing file rather than the actual problem, which is that the
+        # download failed. Say so and exit.
+        #
+        # But a failed refresh with a usable voice present is survivable, and
+        # exiting there would take a working offline deployment down over a
+        # transient network problem. Serve what we have.
+        # Both files, not just the graph: PiperTTSRunner reads the .json for
+        # the phoneme_id_map and speaker table, and does so without a guard, so
+        # a half-downloaded voice would still die with a bare traceback about a
+        # missing .json - the exact failure this branch exists to prevent.
+        voice_path = args.models_dir / f"{args.voice_name}.onnx"
+        config_path = args.models_dir / f"{args.voice_name}.onnx.json"
+        missing = [str(p) for p in (voice_path, config_path) if not p.exists()]
+        if missing:
+            logger.error(
+                "Voice incomplete after a failed download (missing %s); cannot serve.",
+                ", ".join(missing),
+            )
+            sys.exit(1)
+        logger.warning(
+            "Continuing with the existing voice at %s; it may be out of date.",
+            voice_path,
+        )
 
     # Define voice attribution and voices
     #

@@ -74,7 +74,11 @@ CKPT="$DATA_DIR/ljspeech-medium.ckpt"
 
 if [ ! -f "$CKPT" ]; then
   echo "Downloading public-domain LJSpeech medium checkpoint (846 MB)"
-  curl -sSL -o "$CKPT" "$CKPT_URL"
+  # --fail so an HTTP error is not written out as an 846 MB "checkpoint", and
+  # a .part rename so an interrupted transfer cannot be mistaken for a
+  # complete one on the next run - the existence check above is the only gate.
+  curl -sSL --fail -o "$CKPT.part" "$CKPT_URL"
+  mv "$CKPT.part" "$CKPT"
 fi
 
 # See note 2 above. Regenerated on every run, NOT written only when absent:

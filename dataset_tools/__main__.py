@@ -62,6 +62,19 @@ def _fetch(args: argparse.Namespace) -> int:
 
 
 def _build(args: argparse.Namespace) -> int:
+    if args.potato_speaker and not args.multi_speaker:
+        # The help text says it requires --multi-speaker, but nothing enforced
+        # it: build_dataset only honours potato_speaker in the multi-speaker
+        # branch, so on its own the flag was accepted and silently ignored -
+        # and the potato clips were dropped, which is what the user asked to
+        # avoid. Refuse instead of quietly doing the opposite.
+        print(
+            "--potato-speaker requires --multi-speaker; without it the "
+            "potato-battery clips are dropped rather than kept.",
+            file=sys.stderr,
+        )
+        return 2
+
     out = Path(args.out)
     lines = fetch_pages(out / "pages", opener=http_opener(), delay=args.delay)
     print(f"Building dataset from {len(lines)} lines...")
