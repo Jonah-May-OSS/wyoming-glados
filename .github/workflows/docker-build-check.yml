@@ -4,6 +4,8 @@ name: Docker Build Check
 # unvalidated. This builds the dGPU image (amd64, no push) and runs GPU-free
 # smoke tests — venv relocation (imports), models baked in the expected dir,
 # and TLS trust — whenever the Dockerfile / entrypoint change. Also dispatchable.
+# The voice model is NOT baked into the image: it is fetched at runtime into
+# the mounted models dir, so there is nothing to assert about it here.
 
 permissions:
   contents: read
@@ -12,6 +14,9 @@ on:
   pull_request:
     paths:
       - "docker/Dockerfile"
+      - "docker/Dockerfile.igpu"
+      - "requirements.txt"
+      - "requirements-piper.txt"
       - "docker/run.sh"
       - ".github/workflows/docker-build-check.yml"
   workflow_dispatch: {}
@@ -27,8 +32,6 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
-        with:
-          submodules: recursive
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
@@ -50,41 +53,76 @@ jobs:
             [registry."192.168.7.45:5004"]
               http = true
 
+      # The iGPU image is only ever built at publish time, so until now a
+      # syntax error in Dockerfile.igpu surfaced as a failed release. --check
+      # parses and lints without building, so this costs seconds and needs no
+      # arm64 emulation. It does NOT validate that the image works on Jetson -
+      # see the validation note in Dockerfile.igpu.
+      - name: Lint iGPU Dockerfile (parse only, no build)
+        run: docker buildx build --check --platform linux/arm64 -f docker/Dockerfile.igpu .
+
       - name: Build dGPU image (amd64, load locally, no push)
         uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
         with:
-          context: ./docker
+          context: .
           file: ./docker/Dockerfile
           push: false
           load: true
           tags: wyoming-glados:build-check
           platforms: linux/amd64
+          # Read-only: this job has no registry login, so it seeds from
+          # the cache the release build publishes but cannot write back.
+          # requirements.txt changes rarely, so the expensive venv layer
+          # is usually a hit even on a cache from the last release.
+          cache-from: type=registry,ref=captnspdr/wyoming-glados:buildcache
 
       - name: Import smoke test (venv relocated onto the slim runtime, no GPU)
-        # torch + tensorrt import cleanly without a GPU and prove the venv
-        # relocated. torch_tensorrt is NOT imported here: it eagerly probes for
-        # an NVIDIA driver at import time (Tegra detection) and raises on the
-        # GPU-less CI runner, so we only assert it is present/relocated via
-        # find_spec. Its real functionality is covered by the GPU server-start
-        # validation done before release.
+        # onnxruntime and tensorrt import cleanly without a GPU and prove the
+        # venv relocated. The TensorRT execution provider must be listed as
+        # available: it being absent is how a CPU-only onnxruntime silently
+        # replaces the GPU build.
+        #
+        # server.handler is imported too, so a runtime dependency missing from
+        # requirements.txt fails here rather than when the container starts.
         run: |
           docker run --rm \
             --entrypoint /usr/src/wyoming-glados/venv/bin/python \
             -w /usr/src/wyoming-glados \
             wyoming-glados:build-check \
-            -c "import torch, tensorrt, importlib.util; \
-                assert importlib.util.find_spec('torch_tensorrt'), 'torch_tensorrt missing'; \
-                print('torch', torch.__version__); \
+            -c "import importlib.util, onnxruntime, tensorrt; \
+                import server.handler, piper_runtime; \
+                providers = onnxruntime.get_available_providers(); \
+                assert 'TensorrtExecutionProvider' in providers, providers; \
+                print('onnxruntime', onnxruntime.__version__); \
                 print('tensorrt', tensorrt.__version__); \
-                print('torch_tensorrt present (GPU-only import path skipped)')"
+                print('providers', providers)"
 
-      - name: Models baked into the runtime image (matches run.sh MODEL_DIR)
+      # onnxruntime-gpu and the CPU-only onnxruntime package own the same
+      # module, so if both land the CPU build wins and CUDA/TensorRT vanish
+      # with no error - just ~5x less throughput. piper-tts depends on the CPU
+      # one, which is why it installs with --no-deps; this asserts that held.
+      - name: CPU onnxruntime must not shadow the GPU build
         run: |
           docker run --rm --entrypoint sh wyoming-glados:build-check -c '
-            d=/usr/src/wyoming-glados/gladostts/models
-            echo "listing $d:"; ls -la "$d"
-            [ -n "$(ls -A "$d" 2>/dev/null)" ] || { echo "MODELS MISSING in $d"; exit 1; }
-            echo "models present OK"'
+            if /usr/src/wyoming-glados/venv/bin/pip show onnxruntime >/dev/null 2>&1; then
+              echo "FAIL: CPU onnxruntime is installed and shadows onnxruntime-gpu"
+              exit 1
+            fi
+            echo "CPU onnxruntime absent OK"'
+
+      # piper bundles espeak-ng: espeakbridge.so links it statically and ships
+      # its own espeak-ng-data, so there is no system package to assert on.
+      # What matters is that phonemization actually runs - without it the
+      # server starts and then fails every synthesis request.
+      - name: Phonemizer produces phonemes
+        run: |
+          docker run --rm \
+            --entrypoint /usr/src/wyoming-glados/venv/bin/python \
+            wyoming-glados:build-check \
+            -c "from piper.phonemize_espeak import EspeakPhonemizer; \
+                out = EspeakPhonemizer().phonemize('en-us', 'Hello there.'); \
+                assert out and out[0], out; \
+                print('phonemes', out[0][:6])"
 
       - name: TLS trust smoke test (catches a missing CA bundle, no GPU needed)
         run: |
