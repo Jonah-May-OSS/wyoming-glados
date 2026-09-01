@@ -427,3 +427,34 @@ def test_default_url_is_pinned_to_a_voice_tag_not_latest():
     assert "/releases/latest/" not in download.DEFAULT_URL
     assert f"/releases/download/{download.VOICE_RELEASE}/" in download.DEFAULT_URL
     assert download.DEFAULT_URL.format(file="glados.onnx").endswith("/glados.onnx")
+
+
+class TestVoiceChecksums:
+    """The published hashes must apply to the published voice, and only it."""
+
+    def test_default_voice_on_the_default_url_gets_checksums(self):
+        # Without these a VOICE_RELEASE bump is silently inert: the ONNX graph
+        # is the same shape at every epoch, so exports of different
+        # checkpoints are byte-identical in LENGTH and the size fallback in
+        # _classify() can never see a retrained voice.
+        sums = download._voice_checksums(download.DEFAULT_VOICE_NAME,
+                                         download.DEFAULT_URL)
+        assert sums["glados.onnx"] == download.VOICE_CHECKSUMS["glados.onnx"]
+        assert sums["glados.onnx.json"]
+
+    def test_a_different_voice_gets_none(self):
+        assert download._voice_checksums("othervoice", download.DEFAULT_URL) == {}
+
+    def test_a_different_url_gets_none(self):
+        # A mirror or a locally served export is a supported setup; checking it
+        # against glados' hashes would fail a good file, and since a mismatch
+        # means re-download, that is an unbreakable loop rather than an error.
+        assert download._voice_checksums(
+            download.DEFAULT_VOICE_NAME, "https://example.com/{file}"
+        ) == {}
+
+    def test_returns_a_copy_so_callers_cannot_mutate_the_table(self):
+        sums = download._voice_checksums(download.DEFAULT_VOICE_NAME,
+                                         download.DEFAULT_URL)
+        sums["glados.onnx"] = "tampered"
+        assert download.VOICE_CHECKSUMS["glados.onnx"] != "tampered"

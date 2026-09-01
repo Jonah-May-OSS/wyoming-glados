@@ -37,6 +37,18 @@ class ModelFile(TypedDict):
 # the PR that ships it. This is what the pre-Piper code did (it pinned
 # glados-tts 1.0.0), arrived at the same way.
 VOICE_RELEASE = "voice-2026.09.01"
+
+# md5 of each asset on VOICE_RELEASE, keyed by filename. Bump with the tag.
+#
+# Only valid for the voice these describe, so they are keyed by the default
+# voice name and applied only to it. A --voice-name pointing at some other
+# voice hosted at the same URL would otherwise fail verification against
+# glados' hashes and re-download forever.
+DEFAULT_VOICE_NAME = "glados"
+VOICE_CHECKSUMS: dict[str, str] = {
+    "glados.onnx": "fbe7ad25c02eff554e69f3a8128f71a7",
+    "glados.onnx.json": "bcd03937e5bdaeac0ef5c7fafee91d06",
+}
 DEFAULT_URL = (
     "https://github.com/Jonah-May-OSS/wyoming-glados/releases/download/"
     f"{VOICE_RELEASE}/{{file}}"
@@ -157,6 +169,26 @@ def _classify(model: ModelFile, path: Path, url: str) -> tuple[bool, bool]:
     return False, True
 
 
+def _voice_checksums(voice_name: str, base_url: str) -> dict[str, str]:
+    """The published checksums, but only where they actually apply.
+
+    VOICE_CHECKSUMS describes the assets on VOICE_RELEASE for the default
+    voice. Applied to anything else they are not a weaker check but a wrong
+    one: verification would fail on a perfectly good file, and since a
+    mismatch means "re-download", the result is an unbreakable loop rather
+    than a clear error.
+
+    Two ways to end up somewhere else, both supported on purpose: --voice-name
+    for a different voice, and --url for a different host (an air-gapped
+    mirror, or a locally exported voice served over HTTP).
+    """
+    if voice_name != DEFAULT_VOICE_NAME:
+        return {}
+    if base_url != DEFAULT_URL:
+        return {}
+    return dict(VOICE_CHECKSUMS)
+
+
 def ensure_model_exists(
     download_dir: Path, base_url: str, voice_name: str = "glados"
 ) -> bool:
@@ -172,21 +204,33 @@ def ensure_model_exists(
 
     # The VITS voice is two files: the ONNX graph and the config carrying the
     # phoneme_id_map the runtime needs to turn phonemes into model inputs.
-    # Checksums are left unset until the voice is published to a release; a
-    # None checksum only skips verification, it still requires the file.
     # Derived from voice_name, not hardcoded: __main__.py exposes --voice-name
     # and VOICE_NAME, and used to invoke this script without passing either. A
     # non-default voice therefore downloaded glados.onnx, exited 0, and left
     # PiperTTSRunner to raise FileNotFoundError for a file nothing had tried to
     # fetch - a traceback that blamed the wrong thing entirely.
+    #
+    # The checksums are what make a VOICE_RELEASE bump actually reach an
+    # existing deployment, and without them the bump is silently inert. The
+    # size fallback in _classify() cannot help here: the ONNX graph is the same
+    # shape at every epoch, so only the weight VALUES differ. Exports of four
+    # different checkpoints all came to exactly 76771148 bytes, so a size
+    # comparison can never see a retrained voice for this architecture.
+    #
+    # Publishing a hash is safe because the export is deterministic - the same
+    # checkpoint exported four times produced one md5, matching the artifact on
+    # the release. Bump these together with VOICE_RELEASE; that they move as a
+    # set is the point, and _voice_checksums() keeps them from being applied to
+    # a voice they do not describe.
+    md5_by_file = _voice_checksums(voice_name, base_url)
     model_files: list[ModelFile] = [
         {
             "filename": f"{voice_name}.onnx",
-            "md5": None,
+            "md5": md5_by_file.get(f"{voice_name}.onnx"),
         },
         {
             "filename": f"{voice_name}.onnx.json",
-            "md5": None,
+            "md5": md5_by_file.get(f"{voice_name}.onnx.json"),
         },
     ]
 
