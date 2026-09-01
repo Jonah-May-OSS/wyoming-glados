@@ -23,10 +23,16 @@
 #
 # Native arm64 is what SBSA buys us. JetPack 7 / Thor aligned Jetson with
 # SBSA and a unified CUDA 13 install across Arm targets, which is the CUDA
-# major this stack targets (onnxruntime-gpu 1.29, tensorrt-cu13), so the
-# generic SBSA aarch64 wheels are correct for modern Jetson too - one arm64
-# build serves generic Arm servers and JetPack 7 alike, and GitHub's
-# ubuntu-24.04-arm runners are that same SBSA class.
+# major this stack targets (onnxruntime-gpu 1.29), so the generic SBSA
+# aarch64 wheels are correct for modern Jetson too - one arm64 build serves
+# generic Arm servers and JetPack 7 alike, and GitHub's ubuntu-24.04-arm
+# runners are that same SBSA class.
+#
+# Note what that arm64 build is NOT: onnxruntime-gpu ships the TensorRT
+# execution provider only in its x86_64 wheels, so the arm64 slice runs on
+# CUDA. That has been true since the first multi-arch release; the image
+# build only started failing over it when the provider check landed, because
+# until then nothing looked. See the check in docker/Dockerfile.
 #
 # The iGPU image is the exception and stays emulated. JetPack 6 and the NGC
 # Tegra base predate the SBSA alignment, so a native SBSA arm64 runner is not

@@ -144,32 +144,42 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 COPY --from=builder /usr/src/wyoming-glados /usr/src/wyoming-glados
 
-# onnxruntime dlopens the CUDA, cuDNN and TensorRT shared libraries at runtime.
-# They live inside the venv's site-packages, which the dynamic loader does not
-# search. Registering them with ldconfig is preferred over LD_LIBRARY_PATH:
-# an env var is lost through anything that resets the environment (a login
-# shell, a supervisor, docker exec), and the failure is silent - the provider
-# just fails to load and every request falls back to CPU.
-# Registered is not the same as loadable. onnxruntime reports a provider it
-# was compiled with even when the .so behind it cannot resolve its own
-# dependencies, and it then falls back to CPU in silence. That is not
-# hypothetical: the CI job that launches this server the same way ran on CPU
-# because libcublas.so.13 was unresolvable - it started, listened, and
-# passed. ldd is what turns that into a build failure.
+# onnxruntime-gpu ships the TensorRT execution provider ONLY in its x86_64
+# wheels. The manylinux aarch64 wheel contains libonnxruntime_providers_cuda.so
+# and libonnxruntime_providers_shared.so and no TensorRT provider at all
+# (verified against onnxruntime_gpu-1.29.0-cp312-cp312-manylinux_2_34_aarch64:
+# 354 entries, no libonnxruntime_providers_tensorrt.so; the x86_64 wheel has
+# it). So the arm64 image runs on CUDA, and has done since the first
+# multi-arch release - nothing checked, so nobody knew.
+#
+# Hence the per-architecture branch. Asserting TensorRT everywhere fails the
+# arm64 build outright; asserting nothing is how the CPU-fallback bug shipped
+# in the first place. Each architecture is held to what its wheels actually
+# provide.
 RUN set -eu; \
     SP=/usr/src/wyoming-glados/venv/lib/python3.12/site-packages; \
-    { echo "$SP/tensorrt_libs"; ls -d "$SP"/nvidia/*/lib 2>/dev/null; } \
+    { ls -d "$SP"/tensorrt_libs 2>/dev/null || true; \
+      ls -d "$SP"/nvidia/*/lib 2>/dev/null || true; } \
          > /etc/ld.so.conf.d/wyoming-glados.conf; \
     ldconfig; \
-    ldconfig -p | grep -q libnvinfer.so.10 \
-      || { echo "libnvinfer not registered"; exit 1; }; \
-    PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_tensorrt.so"; \
+    case "$(uname -m)" in \
+      x86_64) \
+        WANT="TensorRT"; \
+        PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_tensorrt.so"; \
+        ldconfig -p | grep -q libnvinfer.so.10 \
+          || { echo "libnvinfer not registered"; exit 1; }; \
+        ;; \
+      *) \
+        WANT="CUDA"; \
+        PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_cuda.so"; \
+        ;; \
+    esac; \
     [ -f "$PROVIDER" ] \
-      || { echo "TensorRT provider library missing at $PROVIDER"; exit 1; }; \
+      || { echo "$WANT provider library missing at $PROVIDER"; exit 1; }; \
     MISSING="$(ldd "$PROVIDER" | grep 'not found' || true)"; \
     [ -z "$MISSING" ] \
       || { echo "provider has unresolved libraries:"; echo "$MISSING"; exit 1; }; \
-    echo "TensorRT provider resolves OK"
+    echo "$WANT provider resolves OK on $(uname -m)"
 
 WORKDIR /
 COPY docker/run.sh ./

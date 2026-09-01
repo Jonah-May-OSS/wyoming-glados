@@ -32,6 +32,12 @@ per utterance; realtime factor is audio seconds produced per second of compute.
 | CUDA | 140 ms | 436 ms | 15x | 3.1 s |
 | CPU | 85 ms | 147 ms | 35x | 1.7 s |
 
+**arm64 gets no TensorRT.** `onnxruntime-gpu` ships the TensorRT execution
+provider only in its x86_64 wheels - the manylinux aarch64 wheel carries
+`libonnxruntime_providers_cuda.so` and no TensorRT provider at all - so the
+`arm64` slice of the image runs on CUDA. Read the next paragraph before
+assuming that is still a win over CPU on an Arm box.
+
 **Plain CUDA is slower than CPU for this model**, which is worth knowing before
 treating it as the fallback. ONNX Runtime reports the reason: *"28 Memcpy nodes
 are added to the graph for CUDAExecutionProvider"*. VITS has enough ops the
