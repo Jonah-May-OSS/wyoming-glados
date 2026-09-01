@@ -16,7 +16,7 @@ much of Portal 2), i.e. original quality rather than lossy re-encodes.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
 WIKI_BASE = "https://theportalwiki.com/wiki/"
@@ -114,6 +114,41 @@ def audio_annotations(raw: str) -> list[str]:
 # strands "-- --" in the middle of the line. Dashes NOT adjacent to an
 # annotation are left alone: they mark GLaDOS interrupting herself ("finally
 # be ba--"), which is real speech the model should learn.
+# Quote characters that can delimit a spoken line on the wiki. Straight
+# quotes are the convention; the curly pair appears occasionally, and
+# treating one as ordinary text would silently drop a real line.
+# A frozenset, deliberately, not a string. `"" in "\"“”"` is True - every
+# string contains the empty string - so a run with no character before or
+# after it passed the quote test vacuously, and stage directions that open
+# a <li> were kept as transcripts.
+_QUOTE_CHARS = frozenset('"“”')
+
+# Inner quotation marks, skipped when looking for the delimiter above. GLaDOS
+# quotes things constantly, and the wiki nests them:
+#
+#     <li>"'<i>Shall not be mourned.' That's exactly what it says.</i>" ...
+#
+# The character right before the run is then the inner ‘, not the outer ",
+# so testing only the adjacent character discarded three real lines.
+_INNER_QUOTE_CHARS = frozenset("'‘’")
+
+
+def _delimiter_before(text: str) -> str:
+    """Last meaningful character before an italic run, inner quotes skipped."""
+    stripped = text.rstrip()
+    while stripped and stripped[-1] in _INNER_QUOTE_CHARS:
+        stripped = stripped[:-1].rstrip()
+    return stripped[-1] if stripped else ""
+
+
+def _delimiter_after(text: str) -> str:
+    """First meaningful character after an italic run, inner quotes skipped."""
+    stripped = text.lstrip()
+    while stripped and stripped[0] in _INNER_QUOTE_CHARS:
+        stripped = stripped[1:].lstrip()
+    return stripped[0] if stripped else ""
+
+
 _ANNOTATION_STRIP_RE = re.compile(r"-*\[[^\]]*\]-*")
 _PAREN_STRIP_RE = re.compile(r"-*\([^)]*\)-*")
 
@@ -160,6 +195,15 @@ class _Frame:
     transcript: list[str]
     url: str
     i_depth: int
+    # Text seen OUTSIDE any <i>, used to decide whether an italic run is a
+    # spoken line or an editorial aside - see _VoiceLineParser.
+    outside: list[str] = field(default_factory=list)
+    # Italic runs closed so far, each with whether it was quote-delimited.
+    runs: list[tuple[str, bool]] = field(default_factory=list)
+    # The character immediately before the italic run currently open.
+    opened_after: str = ""
+    # Index of a run whose closing quote has not been looked for yet.
+    awaiting_close: int = -1
 
 
 class _VoiceLineParser(HTMLParser):
@@ -194,6 +238,10 @@ class _VoiceLineParser(HTMLParser):
         elif self._frames:
             frame = self._frames[-1]
             if tag == "i":
+                if frame.i_depth == 0:
+                    # Remember the character this run opens after, so a
+                    # closing </i> can decide whether it was quoted.
+                    frame.opened_after = _delimiter_before("".join(frame.outside))
                 frame.i_depth += 1
             elif tag == "a" and not frame.url:
                 href = dict(attrs).get("href") or ""
@@ -209,7 +257,14 @@ class _VoiceLineParser(HTMLParser):
                 self._h3 = text
             self._heading_level = 0
         elif tag == "i" and self._frames and self._frames[-1].i_depth:
-            self._frames[-1].i_depth -= 1
+            frame = self._frames[-1]
+            frame.i_depth -= 1
+            if frame.i_depth == 0:
+                frame.runs.append(("".join(frame.transcript), False))
+                frame.transcript = []
+                # The closing quote sits in the text after </i>, which has not
+                # been seen yet.
+                frame.awaiting_close = len(frame.runs) - 1
         elif tag == "li" and self._frames:
             self._emit(self._frames.pop())
 
@@ -218,9 +273,46 @@ class _VoiceLineParser(HTMLParser):
             self._heading_buf.append(data)
         elif self._frames and self._frames[-1].i_depth:
             self._frames[-1].transcript.append(data)
+        elif self._frames:
+            frame = self._frames[-1]
+            if frame.awaiting_close >= 0:
+                closed_by = _delimiter_after(data)
+                text, _ = frame.runs[frame.awaiting_close]
+                quoted = (
+                    frame.opened_after in _QUOTE_CHARS and closed_by in _QUOTE_CHARS
+                )
+                frame.runs[frame.awaiting_close] = (text, quoted)
+                frame.awaiting_close = -1
+            frame.outside.append(data)
 
     def _emit(self, frame: _Frame) -> None:
-        raw = "".join(frame.transcript)
+        """Emit the spoken line from one <li>, if it has one.
+
+        A <li> can hold more than one italic run, and only the first is the
+        line. The wiki writes editorial asides in italics too, immediately
+        after the transcript and inside the same <li>:
+
+            <li>"<i>...you'll be dead.</i>" ... <i>"with the sphere, cycle
+            through these:"</i>)</li>
+
+        Concatenating every run appended that instruction to the transcript,
+        so the model was trained to read stage directions aloud. Some entries
+        are an aside and nothing else, with the audio being a sound effect:
+
+            <li><i>Upon destroying of the last three cores, this will
+            sound:</i> <a ...>"*scream*"</a></li>
+
+        That one paired a death scream with a sentence GLaDOS never says.
+
+        The discriminator is the wiki's own convention: a spoken line is
+        wrapped in quotes that sit OUTSIDE the <i>, an aside is not. Note the
+        aside above contains quotes of its own, so the test has to be on the
+        delimiters around the run rather than on its content.
+        """
+        quoted = [text for text, is_quoted in frame.runs if is_quoted]
+        if not quoted:
+            return
+        raw = quoted[0]
         transcript = clean_transcript(raw)
         if transcript and frame.url:
             self.lines.append(

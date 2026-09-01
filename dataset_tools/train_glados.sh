@@ -198,10 +198,10 @@ def _validation_epoch_end(self):
     try:
         result = _orig_validation_epoch_end(self)
         if not self.trainer.sanity_checking:
-            # Inside the seeded window: MCD must measure the same draw each
+            # Inside the seeded window: the distance must measure the same draw each
             # epoch or it inherits the sampling noise it exists to avoid.
             torch.manual_seed(_VAL_SEED)
-            _log_mcd(self)
+            _log_cepdist(self)
     finally:
         torch.random.set_rng_state(cpu_state)
         if cuda_states is not None:
@@ -246,7 +246,7 @@ VitsModel.on_validation_epoch_end = _validation_epoch_end
 
 
 # ---------------------------------------------------------------------------
-# val_mcd: distance from GLaDOS's actual recording of the same sentence.
+# val_cepdist: distance from GLaDOS's actual recording of the same sentence.
 # ---------------------------------------------------------------------------
 # The metric that actually answers "is this converging on GLaDOS".
 #
@@ -264,9 +264,9 @@ VitsModel.on_validation_epoch_end = _validation_epoch_end
 # Only sqrt(2), not the usual 10/ln(10)*sqrt(2): power_to_db below is
 # 10*log10, so the coefficients already carry that factor and applying it again
 # double-counts (it inflated the metric by ~4.3x on the first attempt).
-_MCD_K = math.sqrt(2.0)
+_CEPDIST_K = math.sqrt(2.0)
 # Bounds the dynamic range so near-silent frames cannot dominate the distance.
-_MCD_TOP_DB = 40.0
+_CEPDIST_TOP_DB = 40.0
 
 
 def _mcep(y: "np.ndarray", sample_rate: int) -> "np.ndarray":
@@ -275,20 +275,30 @@ def _mcep(y: "np.ndarray", sample_rate: int) -> "np.ndarray":
     if trimmed.size >= 512:
         y = trimmed
     mel = librosa.feature.melspectrogram(y=y, sr=sample_rate, n_mels=80)
-    spec_db = librosa.power_to_db(mel, ref=np.max, top_db=_MCD_TOP_DB)
+    spec_db = librosa.power_to_db(mel, ref=np.max, top_db=_CEPDIST_TOP_DB)
     # c0 is overall energy, which normalisation already controls; dropping it
     # is the convention and keeps the metric about spectral shape.
     return librosa.feature.mfcc(S=spec_db, n_mfcc=25)[1:]
 
 
-def _mcd(synth: "np.ndarray", ref: "np.ndarray", sample_rate: int) -> float:
-    """Cepstral distance between two waveforms, DTW-aligned.
+def _cepdist(synth: "np.ndarray", ref: "np.ndarray", sample_rate: int) -> float:
+    """DTW-aligned cepstral distance between two waveforms.
 
-    NOT calibrated to published MCD. Textbook MCD is single-digit dB; this
-    reads ~24 on a converged model, because it is computed from mel-filterbank
-    cepstra rather than a WORLD spectral envelope. Measured over 250 epochs it
-    moved 27.5 -> 24.5 and ranked checkpoints consistently, so it is a sound
-    RELATIVE tracker - just do not compare the number to a paper.
+    Deliberately NOT called MCD, and not comparable to one.
+
+    It was, and the name cost real time: 26 looked alarming next to the
+    single-digit MCDs papers report, and the number was investigated as if the
+    model were bad. It is not the same quantity. Published MCD is computed
+    from a WORLD or STRAIGHT spectral envelope; this is computed from
+    mel-filterbank cepstra, per-utterance peak-normalised and clipped to
+    _CEPDIST_TOP_DB, over 24 coefficients. Those choices shift the scale by a
+    constant nobody here has measured, so no offset is applied - an
+    uncalibrated number with an honest name beats a calibrated-looking one
+    with a borrowed name.
+
+    What it is good for is ranking, which is all the checkpoint callback asks
+    of it: over 250 epochs it moved 27.5 -> 24.5 and ordered checkpoints
+    consistently with listening tests.
 
     DTW is required, not optional: the stochastic duration predictor makes each
     synthesis a different length from the reference, so a frame-to-frame
@@ -297,10 +307,10 @@ def _mcd(synth: "np.ndarray", ref: "np.ndarray", sample_rate: int) -> float:
     a, b = _mcep(synth, sample_rate), _mcep(ref, sample_rate)
     _, path = librosa.sequence.dtw(X=a, Y=b, metric="euclidean")
     diff = a[:, path[:, 0]] - b[:, path[:, 1]]
-    return float(_MCD_K * np.mean(np.sqrt(np.sum(diff * diff, axis=0))))
+    return float(_CEPDIST_K * np.mean(np.sqrt(np.sum(diff * diff, axis=0))))
 
 
-def _log_mcd(self) -> None:
+def _log_cepdist(self) -> None:
     scores = []
     for utt in self.trainer.datamodule.test_dataset:
         text = utt.phoneme_ids.unsqueeze(0).to(self.device)
@@ -312,9 +322,9 @@ def _log_mcd(self) -> None:
         ref = utt.audio_norm.flatten().float().cpu().numpy()
         if synth.size < 512 or ref.size < 512:
             continue
-        scores.append(_mcd(synth, ref, self.hparams.sample_rate))
+        scores.append(_cepdist(synth, ref, self.hparams.sample_rate))
     if scores:
-        self.log("val_mcd", sum(scores) / len(scores), prog_bar=True, sync_dist=True)
+        self.log("val_cepdist", sum(scores) / len(scores), prog_bar=True, sync_dist=True)
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +342,7 @@ def _log_mcd(self) -> None:
 # ---------------------------------------------------------------------------
 # Each checkpoint is ~845 MB, and three metrics each keeping their own top-5
 # plus a periodic ladder filled a 1 TB disk and took WSL down with it. Depth is
-# now set by how much each metric is actually trusted: val_mcd is the selector,
+# now set by how much each metric is actually trusted: val_cepdist is the selector,
 # val_mel is a sanity check, val_mos is a diagnostic that only needs its best.
 # Sized for a 1000-epoch run: 2+1+1+last plus one periodic per 100 epochs is
 # about 13 GB, against ~90 GB at the original settings.
@@ -345,11 +355,11 @@ for _cb in piper_main._DEFAULT_CALLBACKS:
 # Best-by-similarity-to-GLaDOS. This is the ladder to pick a release from.
 piper_main._DEFAULT_CALLBACKS.append(
     ModelCheckpoint(
-        monitor="val_mcd",
+        monitor="val_cepdist",
         mode="min",
         save_top_k=2,
         save_last=False,
-        filename="epoch={epoch}-val_mcd={val_mcd:.3f}",
+        filename="epoch={epoch}-val_cepdist={val_cepdist:.3f}",
         auto_insert_metric_name=False,
     )
 )

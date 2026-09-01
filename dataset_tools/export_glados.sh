@@ -77,30 +77,34 @@ elif [ "${1:-}" = "last" ]; then
   CKPT="$(find "$LOGS_DIR" -name "last.ckpt" -printf '%T@ %p\n' \
     | sort -rn | head -1 | cut -d' ' -f2-)"
 else
-  # Select by val_mcd: the metric train_glados.sh monitors (mode="min",
+  # Select by val_cepdist: the metric train_glados.sh monitors (mode="min",
   # save_top_k=2) and calls "the ladder to pick a release from".
   #
   # This sorted by val_mel, which that same script documents as the WRONG
   # selector - val_mel and train_mel drifted up together while loss_d nearly
   # doubled, so the best-sounding checkpoint is often not the lowest-val_mel
-  # one. Worse, the old glob could not match an epoch=...-val_mcd=... name at
-  # all, so the val_mcd checkpoints were unreachable without an explicit path.
+  # one. Worse, the old glob could not match an epoch=...-<metric>=... name
+  # at all, so those checkpoints were unreachable without an explicit path.
   #
   # -n with /p so lines that do not match are DROPPED. Anchoring on
   # '<metric>.ckpt' missed Lightning's -vN collision suffix
-  # (epoch=99-val_mcd=9.999-v1.ckpt), and an unmatched line passed through
-  # unchanged, sorted ahead of every numeric one, and won - selecting the
-  # worst checkpoint instead of the best.
+  # (epoch=99-val_cepdist=9.999-v1.ckpt), and an unmatched line passed
+  # through unchanged, sorted ahead of every numeric one, and won -
+  # selecting the worst checkpoint instead of the best.
   #
-  # val_mel remains the fallback for runs trained before val_mcd was added.
-  CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mcd=*.ckpt" \
-    | sed -n 's/.*val_mcd=\([0-9]*\.[0-9]*\).*/\1 &/p' \
-    | sort -n | head -1 | cut -d' ' -f2-)"
-  if [ -z "${CKPT:-}" ]; then
-    CKPT="$(find "$LOGS_DIR" -name "epoch=*val_mel=*.ckpt" \
-      | sed -n 's/.*val_mel=\([0-9]*\.[0-9]*\).*/\1 &/p' \
-      | sort -n | head -1 | cut -d' ' -f2-)"
-  fi
+  # Three names, newest first. val_mcd is what val_cepdist was called before
+  # it was renamed for not being MCD, and runs from before the rename still
+  # have those filenames on disk - dropping the pattern would strand every
+  # one of them. val_mel is the fallback for runs older than either.
+  pick_by_metric() {
+    find "$LOGS_DIR" -name "epoch=*$1=*.ckpt" \
+      | sed -n "s/.*$1=\([0-9]*\.[0-9]*\).*/\1 &/p" \
+      | sort -n | head -1 | cut -d" " -f2-
+  }
+  for _metric in val_cepdist val_mcd val_mel; do
+    CKPT="$(pick_by_metric "$_metric")"
+    [ -n "${CKPT:-}" ] && break
+  done
 fi
 
 if [ -z "${CKPT:-}" ] || [ ! -f "$CKPT" ]; then

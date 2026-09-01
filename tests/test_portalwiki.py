@@ -271,3 +271,70 @@ def test_parse_page_flags_lines_whose_audio_holds_a_sound():
     lines = {line.filename: line for line in parse_page(html, next(iter(PAGES)))}
     assert lines["clean.wav"].has_audio_annotation is False
     assert lines["horn.wav"].has_audio_annotation is True
+
+
+class TestOnlyQuotedItalicsAreTranscripts:
+    """A <li> can hold editorial italics beside the spoken line.
+
+    The wiki's convention is that a spoken line is wrapped in quotes sitting
+    OUTSIDE the <i>, while an aside is not. Every case below is taken from the
+    live pages, and each one reached metadata.csv before this was fixed.
+    """
+
+    def test_an_aside_after_the_line_is_not_appended(self):
+        # GLaDOS_escape_02_spheredrop1-03: the aside is italic too, and
+        # concatenating every run trained the model to read the stage
+        # direction aloud. Note the aside contains quotes of its own, so the
+        # test has to be on the delimiters, not on the content.
+        html = (
+            '<ul><li>"<i>Because you\'ll be dead.</i>" '
+            '<a href="https://x/drop.wav">Download</a> '
+            '(add <i>"with the sphere, cycle through these:"</i>)</li></ul>'
+        )
+        lines = parse_page(html, next(iter(PAGES)))
+        assert [line.transcript for line in lines] == ["Because you'll be dead."]
+
+    def test_a_wiki_note_run_together_with_the_line_is_dropped(self):
+        # GLaDOS_sp_incinerator_01_15 ended "...Food for thought.Note: This
+        # line was used in the Portal 2 trailer." - no space, so it did not
+        # even read as a separate sentence.
+        html = (
+            '<ul><li>"<i>Food for thought.</i>" '
+            '<a href="https://x/inc.wav">Download</a>'
+            "<i>Note: This line was used in the Portal 2 trailer.</i></li></ul>"
+        )
+        lines = parse_page(html, next(iter(PAGES)))
+        assert [line.transcript for line in lines] == ["Food for thought."]
+
+    def test_an_unquoted_stage_direction_yields_no_line_at_all(self):
+        # GLaDOS_escape_02_sphere_Death_Scream: the audio is a scream, and the
+        # italic text is the wiki describing it. That paired a death scream
+        # with a sentence GLaDOS never says.
+        html = (
+            "<ul><li><i>Upon destroying of the last three cores, this will "
+            'sound:</i> <a href="https://x/scream.wav">"*scream*"</a></li></ul>'
+        )
+        assert parse_page(html, next(iter(PAGES))) == []
+
+    def test_a_line_opening_with_an_inner_quotation_is_kept(self):
+        # GLaDOS_escape_02_miscbabble-26. The line opens `"'` - the outer
+        # double quote then the inner quotation's apostrophe - so testing only
+        # the character adjacent to the run rejected three real lines.
+        html = (
+            "<ul><li>\"'<i>Shall not be mourned.' That's exactly what it "
+            'says.</i>" <a href="https://x/mourn.wav">Download</a></li></ul>'
+        )
+        lines = parse_page(html, next(iter(PAGES)))
+        assert [line.transcript for line in lines] == [
+            "Shall not be mourned.' That's exactly what it says."
+        ]
+
+    def test_a_run_with_nothing_around_it_is_not_treated_as_quoted(self):
+        # `"" in '"'` is True in Python - every string contains the empty
+        # string - so an italic run at the very start of a <li> passed the
+        # quote test vacuously while the check was written against a string.
+        html = (
+            "<ul><li><i>Alternate version of</i> "
+            '<a href="https://x/alt.wav">Download</a></li></ul>'
+        )
+        assert parse_page(html, next(iter(PAGES))) == []
