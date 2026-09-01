@@ -42,6 +42,17 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
+      # Gate the GPU job on the unit tests. There is one self-hosted runner and
+      # the image build competes for it, so spending it on a branch whose tests
+      # already fail is the expensive way to find out.
+      - name: Wait for pytest check
+        uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          check-name: pytest
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+
   test_linux:
     needs: wait_for_checks
     name: "Build and Test on Linux (self-hosted runner)"
