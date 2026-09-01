@@ -144,7 +144,26 @@ COPY --from=builder /usr/src/wyoming-glados /usr/src/wyoming-glados
 # an env var is lost through anything that resets the environment (a login
 # shell, a supervisor, docker exec), and the failure is silent - the provider
 # just fails to load and every request falls back to CPU.
-RUN SP=/usr/src/wyoming-glados/venv/lib/python3.12/site-packages     && { echo "$SP/tensorrt_libs"; ls -d "$SP"/nvidia/*/lib 2>/dev/null; }         > /etc/ld.so.conf.d/wyoming-glados.conf     && ldconfig     && ldconfig -p | grep -q libnvinfer.so.10 || { echo "libnvinfer not registered"; exit 1; }
+# Registered is not the same as loadable. onnxruntime reports a provider it
+# was compiled with even when the .so behind it cannot resolve its own
+# dependencies, and it then falls back to CPU in silence. That is not
+# hypothetical: the CI job that launches this server the same way ran on CPU
+# because libcublas.so.13 was unresolvable - it started, listened, and
+# passed. ldd is what turns that into a build failure.
+RUN set -eu; \
+    SP=/usr/src/wyoming-glados/venv/lib/python3.12/site-packages; \
+    { echo "$SP/tensorrt_libs"; ls -d "$SP"/nvidia/*/lib 2>/dev/null; } \
+         > /etc/ld.so.conf.d/wyoming-glados.conf; \
+    ldconfig; \
+    ldconfig -p | grep -q libnvinfer.so.10 \
+      || { echo "libnvinfer not registered"; exit 1; }; \
+    PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_tensorrt.so"; \
+    [ -f "$PROVIDER" ] \
+      || { echo "TensorRT provider library missing at $PROVIDER"; exit 1; }; \
+    MISSING="$(ldd "$PROVIDER" | grep 'not found' || true)"; \
+    [ -z "$MISSING" ] \
+      || { echo "provider has unresolved libraries:"; echo "$MISSING"; exit 1; }; \
+    echo "TensorRT provider resolves OK"
 
 WORKDIR /
 COPY docker/run.sh ./

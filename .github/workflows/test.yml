@@ -105,6 +105,32 @@ jobs:
           pip install --no-deps -r requirements-piper.txt
           python3 download.py --model-dir "$MODELS_DIR"
 
+      # Reproduce what the image does, because this job exists to test how the
+      # image launches and had stopped doing so.
+      #
+      # onnxruntime dlopens the CUDA/cuDNN/TensorRT libraries at runtime. They
+      # live in the venv's site-packages, which the dynamic loader does not
+      # search. docker/Dockerfile registers them with ldconfig and fails the
+      # build if libnvinfer is missing; this job did neither, so the TensorRT
+      # provider failed to load with "libcublas.so.13: cannot open shared
+      # object file", CUDA failed the same way on libcublasLt, and the server
+      # fell all the way back to CPU - starting, listening, and passing this
+      # job in ten seconds while exercising none of the acceleration it is
+      # here to exercise.
+      #
+      # LD_LIBRARY_PATH rather than ldconfig only because writing
+      # /etc/ld.so.conf.d needs root on a shared runner. The assertion below
+      # is what makes the difference safe: if the path is ever lost, the job
+      # fails instead of silently testing a CPU build.
+      - name: Put the CUDA/TensorRT wheel libraries on the loader path
+        run: |
+          source .venv/bin/activate
+          SP="$(python3 -c 'import site; print(site.getsitepackages()[0])')"
+          LIBS="$SP/tensorrt_libs"
+          for d in "$SP"/nvidia/*/lib; do [ -d "$d" ] && LIBS="$LIBS:$d"; done
+          echo "LD_LIBRARY_PATH=$LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH set to $LIBS"
+
       - name: Start GLaDOS TTS Server and Test Listening
         run: |
           source .venv/bin/activate
@@ -146,6 +172,23 @@ jobs:
           kill $SERVER_PID
           wait $SERVER_PID 2>/dev/null || true
           exit 0
+
+      # Listening is not the same as accelerated. onnxruntime falls back
+      # silently - TensorRT to CUDA to CPU - so without this the job's only
+      # real assertion is that a CPU build can open a socket, which is what it
+      # had been quietly asserting.
+      - name: The server must actually be on TensorRT
+        if: always()
+        run: |
+          echo "--- providers reported at load ---"
+          grep -a "providers:" server.log || true
+          if ! grep -aq "providers:.*TensorrtExecutionProvider" server.log; then
+            echo "FAIL: the server did not load the TensorRT provider."
+            echo "--- provider load errors ---"
+            grep -aiE "Failed to load library|EP Error|Falling back" server.log | head -20
+            exit 1
+          fi
+          echo "TensorRT provider active OK"
 
       - name: Upload Server Logs
         if: always()
