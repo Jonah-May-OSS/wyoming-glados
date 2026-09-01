@@ -1,6 +1,61 @@
 # syntax=docker/dockerfile:1
 
 # ===========================================================================
+# ONNX Runtime for aarch64, compiled with the TensorRT execution provider.
+#
+# onnxruntime-gpu's published aarch64 wheels do not contain
+# libonnxruntime_providers_tensorrt.so - only the CUDA provider and the
+# shared one. Checked against the 1.29.0 release AND the
+# 1.30.0.dev20260901001 nightly: 354 entries each, no TensorRT provider in
+# either. No flag, index or version bump turns it on, so the only way to get
+# TensorRT on ARM is to build it.
+#
+# Two stages picked by TARGETARCH so the compile only ever runs for arm64.
+# amd64 keeps the prebuilt PyPI wheel, which already has the provider - its
+# stage just hands over an empty directory.
+#
+# The NGC TensorRT image is the builder because it carries exactly what a
+# source build needs and the pip wheels do not: nvcc, the CUDA headers,
+# cuDNN and NvInfer.h. It is multi-arch, so this resolves to SBSA aarch64.
+#
+# This layer is expensive once and then free: cache-to mode=max in
+# publish_container.yaml pushes it to buildcache-arm64, so it is rebuilt only
+# when ORT_REF or the base image changes.
+# ===========================================================================
+FROM ubuntu:24.04 AS ortwheel-amd64
+RUN mkdir -p /ortwheel
+
+FROM nvcr.io/nvidia/tensorrt:26.02-py3 AS ortwheel-arm64
+ARG ORT_REF=v1.29.0
+# Kept in step with requirements.txt: the wheel replaces onnxruntime-gpu, so
+# a mismatch would put a different ORT in the image than the pin describes.
+RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/99network-resilience \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        git cmake build-essential python3-dev python3-pip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "$ORT_REF" --recursive \
+        https://github.com/microsoft/onnxruntime /src/onnxruntime
+WORKDIR /src/onnxruntime
+# --allow_running_as_root: the build runs as root in a container.
+# --skip_tests: the test suite needs a GPU, which no builder has.
+# CMAKE_CUDA_ARCHITECTURES is deliberately short - every architecture listed
+# is compiled separately, and this is already the longest step in the image.
+# 87 = Orin, 90 = Hopper/GH200, 100 = Blackwell/GB200, 110 = Thor.
+RUN --mount=type=cache,id=ort-build-arm64,target=/src/onnxruntime/build \
+    ./build.sh \
+        --config Release --update --build --parallel \
+        --build_wheel --skip_tests --allow_running_as_root \
+        --compile_no_warning_as_error \
+        --use_cuda --use_tensorrt \
+        --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
+        --cmake_extra_defines CMAKE_CUDA_ARCHITECTURES=87;90;100;110 \
+    && mkdir -p /ortwheel \
+    && cp build/Linux/Release/dist/*.whl /ortwheel/ \
+    && ls -l /ortwheel
+
+FROM ortwheel-${TARGETARCH} AS ortwheel
+
+# ===========================================================================
 # Builder: plain Ubuntu, matching the runtime stage exactly.
 #
 # This used to be the NGC TensorRT image (tens of GB), which the old
@@ -92,11 +147,22 @@ ARG TARGETARCH
 # CUDA fallback dies on its first Conv node. Measured, not guessed - do not
 # 'optimise' them away on the strength of a library-load audit.
 
+# Empty on amd64, one wheel on arm64. Installed AFTER requirements.txt and
+# with --no-deps, so onnxruntime-gpu's CUDA and cuDNN dependency wheels are
+# still what pulls the runtime libraries in - only the onnxruntime package
+# itself is swapped for the build that has the TensorRT provider.
+COPY --from=ortwheel /ortwheel /tmp/ortwheel
+
 ARG TRT_ARCH=
 RUN --mount=type=cache,id=pip-$TARGETARCH,target=/root/.cache/pip,sharing=locked \
     python3 -m venv --copies venv \
     && venv/bin/pip install -U setuptools wheel \
     && venv/bin/pip install -r requirements.txt \
+    && if ls /tmp/ortwheel/*.whl >/dev/null 2>&1; then \
+         echo "Replacing onnxruntime-gpu with the TensorRT-enabled build:"; \
+         ls -l /tmp/ortwheel/*.whl; \
+         venv/bin/pip install --force-reinstall --no-deps /tmp/ortwheel/*.whl; \
+       fi \
     && venv/bin/pip install --no-deps -r requirements-piper.txt \
     && find venv -type d -name __pycache__ -prune -exec rm -rf {} + \
     && rm -f venv/lib/python3.12/site-packages/tensorrt_libs/*_win_* \

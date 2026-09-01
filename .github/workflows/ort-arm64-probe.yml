@@ -1,0 +1,109 @@
+---
+# How long does building ONNX Runtime with the TensorRT provider actually
+# take on a free native arm64 runner?
+#
+# This exists to answer that with a number instead of a guess. The claim it
+# is testing - that a source build is a multi-hour job needing the
+# self-hosted runner - was asserted without measurement, and the whole
+# argument for where the arm64 image builds rests on it.
+#
+# It builds ONLY the ortwheel-arm64 stage of docker/Dockerfile, natively on
+# ubuntu-24.04-arm (free for public repositories, no QEMU), times it, and
+# uploads the wheel. Nothing is pushed and no image is published.
+#
+# Three outcomes, all useful:
+#   - completes comfortably  -> arm64 stays on the hosted runner
+#   - completes near the cap -> build the wheel once here, publish it, and
+#                               have the image install it rather than
+#                               compiling on every build
+#   - hits the 6h cap        -> the self-hosted runner is justified
+#
+# workflow_dispatch only: this is a measurement, not a gate.
+name: ORT arm64 build probe
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      ort_ref:
+        description: "onnxruntime git ref to build"
+        default: "v1.29.0"
+        required: false
+
+jobs:
+  probe:
+    name: Time an ORT+TensorRT build on native arm64
+    runs-on: ubuntu-24.04-arm
+    # Just under the 6h hosted-runner cap, so the job records a result
+    # instead of being killed mid-step with nothing to show.
+    timeout-minutes: 350
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+
+      - name: Report what we are building on
+        run: |
+          echo "cores:  $(nproc)"
+          echo "memory: $(free -g | awk '/^Mem:/{print $2}') GB"
+          echo "arch:   $(uname -m)"
+          df -h /
+
+      # The NGC TensorRT base is large and the build tree larger. Same
+      # reclaim as the image build, for the same reason.
+      - name: Reclaim disk
+        run: |
+          df -h /
+          for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                   /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                   /usr/share/swift; do
+            sudo rm -rf "$d"
+          done
+          sudo docker image prune --all --force
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
+
+      # --target stops at the wheel stage, so this times the compile and
+      # nothing else. No push, no registry cache: a cache hit would make the
+      # number meaningless.
+      - name: Build the ortwheel-arm64 stage, timed
+        id: build
+        run: |
+          start=$(date +%s)
+          set +e
+          docker buildx build \
+            --target ortwheel-arm64 \
+            --platform linux/arm64 \
+            --build-arg "ORT_REF=${{ inputs.ort_ref }}" \
+            --file docker/Dockerfile \
+            --output "type=local,dest=./ortwheel-out" \
+            --progress plain \
+            .
+          status=$?
+          set -e
+          end=$(date +%s)
+          mins=$(( (end - start) / 60 ))
+          echo "elapsed_minutes=$mins" >> "$GITHUB_OUTPUT"
+          echo "## ORT arm64 build probe" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ref: \`${{ inputs.ort_ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- cores: $(nproc)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- elapsed: **${mins} min**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- exit status: $status" >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      - name: Show what came out
+        if: always()
+        run: |
+          ls -lR ./ortwheel-out 2>/dev/null || echo "no output produced"
+
+      - name: Upload the wheel
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: onnxruntime-gpu-aarch64-tensorrt
+          path: ./ortwheel-out/**/*.whl
+          if-no-files-found: error
+          retention-days: 14
