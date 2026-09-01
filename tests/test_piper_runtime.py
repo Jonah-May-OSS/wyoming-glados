@@ -485,8 +485,39 @@ class TestSpeakerSelection:
         assert resolve_speaker_id(id_map, "p2") == 1
         assert resolve_speaker_id(id_map, "potato") == 3
 
-    def test_no_speaker_means_first_id(self):
+    def test_no_speaker_falls_back_to_first_id_without_a_declared_default(self):
         assert resolve_speaker_id({"speaker_id_map": {"p2": 1}}, None) == 0
+
+    def test_voice_default_speaker_wins_over_id_zero(self):
+        # Id 0 is whichever speaker came first in metadata.csv - for GLaDOS
+        # that is p1 (210 clips), not the main p2 (896). Serving id 0 sounded
+        # like an undertrained model rather than a misconfiguration.
+        cfg = {
+            "speaker_id_map": {"p1": 0, "potato": 1, "p2": 2, "dota2": 3},
+            "num_speakers": 4,
+            "default_speaker": "p2",
+        }
+        assert resolve_speaker_id(cfg, None) == 2
+
+    def test_explicit_speaker_overrides_the_voice_default(self):
+        cfg = {
+            "speaker_id_map": {"p1": 0, "potato": 1, "p2": 2, "dota2": 3},
+            "num_speakers": 4,
+            "default_speaker": "p2",
+        }
+        assert resolve_speaker_id(cfg, "dota2") == 3
+        assert resolve_speaker_id(cfg, 0) == 0
+
+    def test_unresolvable_voice_default_is_an_error(self):
+        # A default that cannot resolve must not degrade to id 0 - that is the
+        # exact silent-wrong-speaker failure this field exists to prevent.
+        cfg = {
+            "speaker_id_map": {"p1": 0, "p2": 1},
+            "num_speakers": 2,
+            "default_speaker": "nobody",
+        }
+        with pytest.raises(ValueError, match="Unknown speaker"):
+            resolve_speaker_id(cfg, None)
 
     def test_numeric_speaker_passes_through(self):
         # A voice that declares no speaker count cannot contradict the id.

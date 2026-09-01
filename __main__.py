@@ -121,8 +121,10 @@ async def main() -> None:
         help=(
             "Speaker to synthesize as, for multi-speaker voices "
             "(p1, p2, dota2, potato). Names resolve through the voice "
-            "config's speaker_id_map. Ignored by single-speaker voices; "
-            "defaults to id 0, which is NOT necessarily the one you want."
+            "config's speaker_id_map. Ignored by single-speaker voices. "
+            "Unset, the voice's own default_speaker is used (p2 for GLaDOS); "
+            "a voice declaring none falls back to id 0, which is merely "
+            "whichever speaker came first in the corpus."
         ),
     )
     args = parser.parse_args()

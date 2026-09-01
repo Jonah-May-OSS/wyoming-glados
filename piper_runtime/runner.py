@@ -359,8 +359,19 @@ def resolve_speaker_id(config: dict[str, Any], speaker: str | int | None) -> int
     property of the trained voice and must be read from its config rather than
     assumed. An unknown name is an error: silently falling back to 0 would
     serve a different character than asked for.
+
+    With no speaker requested, the voice's own `default_speaker` wins over id
+    0. Id 0 is whichever speaker happened to appear first in metadata.csv,
+    which for the GLaDOS voice is p1 (210 clips) rather than the main Portal 2
+    p2 (896). Every evaluation of this voice up to 2026-09-01 unknowingly ran
+    as p1, and the resulting occasional mangled word read as an undertrained
+    model - two extra training runs went into chasing it. Carrying the default
+    in the config keeps it a property of the voice, so a future voice with a
+    different speaker layout cannot inherit a wrong default from the server.
     """
     id_map: dict[str, int] = config.get("speaker_id_map") or {}
+    if speaker is None:
+        speaker = config.get("default_speaker")
     if speaker is None:
         return 0
     if isinstance(speaker, str) and speaker in id_map:
@@ -482,10 +493,22 @@ class PiperTTSRunner:
                 self.config.get("num_speakers", 1),
             )
             if speaker is None:
-                _LOGGER.warning(
-                    "No --speaker/SPEAKER given; defaulting to id 0. Available: %s",
-                    sorted(self.config.get("speaker_id_map") or {}),
-                )
+                default_speaker = self.config.get("default_speaker")
+                if default_speaker is None:
+                    _LOGGER.warning(
+                        "No --speaker/SPEAKER given and this voice declares no "
+                        "default_speaker; falling back to id 0, which is only "
+                        "whichever speaker came first in the corpus. "
+                        "Available: %s",
+                        sorted(self.config.get("speaker_id_map") or {}),
+                    )
+                else:
+                    _LOGGER.info(
+                        "No --speaker/SPEAKER given; using the voice's "
+                        "default_speaker %r. Available: %s",
+                        default_speaker,
+                        sorted(self.config.get("speaker_id_map") or {}),
+                    )
 
     def _trt_profiles(
         self,

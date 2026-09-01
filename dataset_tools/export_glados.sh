@@ -175,6 +175,36 @@ fi
 
 # The voice config carries the phoneme_id_map the runtime needs.
 cp "$DATA_DIR/config.json" "$FINAL.json"
+
+# Stamp the default speaker into the shipped config.
+#
+# Speaker ids come from first appearance in metadata.csv, so id 0 is an
+# accident of corpus ordering - here p1, with 210 clips, rather than the main
+# Portal 2 p2 with 896. Serving id 0 by default produced occasional mangled
+# words that looked exactly like undertraining. The default belongs to the
+# voice, not the server, so a future voice with a different layout cannot
+# inherit this one's answer.
+DEFAULT_SPEAKER="${DEFAULT_SPEAKER:-p2}"
+python3 - "$FINAL.json" "$DEFAULT_SPEAKER" <<'PY'
+import json
+import sys
+
+path, speaker = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    config = json.load(handle)
+
+id_map = config.get("speaker_id_map") or {}
+if id_map and speaker not in id_map:
+    raise SystemExit(
+        f"DEFAULT_SPEAKER={speaker!r} is not in this voice's speaker_id_map "
+        f"({sorted(id_map)}); refusing to ship a default that cannot resolve."
+    )
+config["default_speaker"] = speaker
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(config, handle, indent=2)
+print(f"  default_speaker = {speaker} (id {id_map.get(speaker, 0)})")
+PY
 rm -f "$RAW" "$INFERRED" "$BAKED" "$SLIMMED"
 
 echo
