@@ -114,18 +114,34 @@ jobs:
           df -h /
 
       # The first attempt was killed with SIGTERM at 50% of the compile.
-      # A hosted arm64 runner has 16 GB and no swap, and nvcc peaks hard on
-      # the CUDA kernels; without headroom the kernel reaps the build rather
-      # than letting it page. The Dockerfile caps parallelism for the same
-      # reason - this is the second half of that fix, not an alternative to
-      # it.
+      # A hosted arm64 runner has 16 GB, and nvcc peaks hard on the CUDA
+      # kernels; without headroom the kernel reaps the build rather than
+      # letting it page. The Dockerfile caps parallelism for the same reason -
+      # this is the second half of that fix, not an alternative to it.
+      #
+      # Best-effort on purpose. The first version of this step wrote to
+      # /swapfile, which the runner image already uses, and the failure took
+      # the whole job down before the build even started - insurance is not
+      # allowed to be the thing that breaks it. It writes to /mnt (the large
+      # ephemeral disk) and warns rather than fails.
       - name: Add swap so an nvcc peak cannot kill the build
+        continue-on-error: true
         run: |
+          echo "--- swap before ---"
+          sudo swapon --show || echo "(none)"
           free -h
-          sudo fallocate -l 16G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          SWAP=/mnt/ort-swapfile
+          [ -d /mnt ] || SWAP=/ort-swapfile
+          sudo swapoff "$SWAP" 2>/dev/null || true
+          sudo rm -f "$SWAP"
+          if sudo fallocate -l 16G "$SWAP"              && sudo chmod 600 "$SWAP"              && sudo mkswap "$SWAP" >/dev/null              && sudo swapon "$SWAP"; then
+            echo "added 16G of swap at $SWAP"
+          else
+            echo "::warning::could not add swap; relying on the parallelism cap alone"
+            sudo rm -f "$SWAP" || true
+          fi
+          echo "--- swap after ---"
+          sudo swapon --show || echo "(none)"
           free -h
 
       - name: Set up Docker Buildx
