@@ -8,6 +8,7 @@ from dataset_tools.fetch import (
     ALLOWED_HOSTS,
     MAX_DOWNLOAD_BYTES,
     FetchError,
+    _check_url,
     fetch_audio,
     fetch_pages,
     fetch_with_retries,
@@ -247,7 +248,26 @@ class TestDownloadDestinationIsRestricted:
             opener(f"http://{allowed}/a.wav")
 
     def test_the_wiki_itself_is_allowed(self):
-        assert "theportalwiki.com" in ALLOWED_HOSTS
+        # Exercises _check_url rather than asserting membership in
+        # ALLOWED_HOSTS. Membership reads as `"host" in <collection>`, which is
+        # indistinguishable from a substring check on a URL, and CodeQL flags
+        # it as incomplete URL sanitization. Calling the real function is both
+        # the stronger assertion and free of that shape.
+        url = "https://theportalwiki.com/w/images/GLaDOS_line.wav"
+        assert _check_url(url) == url
+
+    def test_an_allowed_host_as_a_mere_substring_is_still_refused(self):
+        # The check compares the parsed hostname for equality, so a host that
+        # merely contains an allowed name does not pass. This is the failure
+        # CodeQL's rule is about, pinned as behaviour.
+        opener = http_opener()
+        for host in (
+            "theportalwiki.com.evil.example",
+            "eviltheportalwiki.com",
+            "evil.example?theportalwiki.com",
+        ):
+            with pytest.raises(FetchError, match="not in ALLOWED_HOSTS"):
+                opener(f"https://{host}/a.wav")
 
     def test_the_size_cap_is_smaller_than_available_memory(self):
         # A guard that is effectively unbounded is not a guard.
