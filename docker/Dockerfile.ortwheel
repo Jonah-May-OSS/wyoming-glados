@@ -63,19 +63,37 @@ WORKDIR /src/onnxruntime
 # --compile_no_warning_as_error: a release branch that warns on a newer
 #   toolchain should not fail the build.
 #
-# CMAKE_CUDA_ARCHITECTURES is deliberately short. Every architecture listed
-# is compiled separately and this is by far the longest step, so the list
-# covers the Arm targets that actually exist rather than everything CUDA
-# supports: 87 = Orin, 90 = Hopper/GH200, 100 = Blackwell/GB200, 110 = Thor.
+# The attention kernels are OFF because this builds a runtime for VITS, a
+# small convolutional TTS model that uses none of them. The first attempt was
+# killed with SIGTERM at 50%, and what it was compiling when it died says
+# why: flash_fwd_hdim128_bf16_sm80, moe_gemm_tma_ws_sm90_bf16,
+# fpA_intB_gemm - LLM attention and mixture-of-experts kernels. They are the
+# most memory-hungry things nvcc compiles here and nothing in this project
+# will ever call them.
+#
+# Parallelism is capped for the same reason. A 4-core arm64 runner with 16 GB
+# multiplies memory by build jobs AND by nvcc threads inside each, and the
+# default (nproc x 4) is what ran the machine out. Slower per step, but a
+# build that finishes beats a build that is killed at 50%.
+#
+# CMAKE_CUDA_ARCHITECTURES is deliberately short: every architecture is
+# compiled separately. 87 = Orin, 90 = Hopper/GH200, 100 = Blackwell/GB200,
+# 110 = Thor.
 ARG CUDA_ARCHS=87;90;100;110
+ARG BUILD_PARALLEL=2
+ARG NVCC_THREADS=1
 RUN ./build.sh \
         --cmake_path /opt/cmake/bin/cmake \
-        --config Release --update --build --parallel \
+        --config Release --update --build \
         --build_wheel --skip_tests --allow_running_as_root \
         --compile_no_warning_as_error \
         --use_cuda --use_tensorrt \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
-        --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
+        --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
+        --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}" \
+            onnxruntime_USE_FLASH_ATTENTION=OFF \
+            onnxruntime_USE_MEMORY_EFFICIENT_ATTENTION=OFF \
+            onnxruntime_USE_LEAN_ATTENTION=OFF
 
 # Fail here rather than shipping a wheel without the very provider this
 # whole file exists to produce.

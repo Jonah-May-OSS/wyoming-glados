@@ -113,6 +113,21 @@ jobs:
           sudo docker image prune --all --force
           df -h /
 
+      # The first attempt was killed with SIGTERM at 50% of the compile.
+      # A hosted arm64 runner has 16 GB and no swap, and nvcc peaks hard on
+      # the CUDA kernels; without headroom the kernel reaps the build rather
+      # than letting it page. The Dockerfile caps parallelism for the same
+      # reason - this is the second half of that fix, not an alternative to
+      # it.
+      - name: Add swap so an nvcc peak cannot kill the build
+        run: |
+          free -h
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
 
@@ -137,6 +152,19 @@ jobs:
             echo "- build time: **${mins} min**"
           } >> "$GITHUB_STEP_SUMMARY"
           ls -l ./ortwheel
+
+      # A build killed for resources reports "exit code 143" and nothing
+      # else, which is what made the first failure take a round trip to
+      # diagnose. Capture the state that explains it.
+      - name: What the machine looked like afterwards
+        if: always()
+        run: |
+          echo "--- memory ---"; free -h
+          echo "--- disk ---";   df -h /
+          echo "--- OOM kills, if any ---"
+          if ! sudo dmesg 2>/dev/null | grep -iE "out of memory|killed process"; then
+            echo "(no OOM messages in dmesg)"
+          fi
 
       - name: Publish the wheel
         env:
