@@ -88,7 +88,16 @@ _INT16_MAX = 32767.0
 
 
 class Session(Protocol):
-    """The slice of an onnxruntime InferenceSession this module uses."""
+    """The slice of an onnxruntime InferenceSession this module uses.
+
+    The `...` bodies below look redundant next to the docstrings, and both
+    pylint (unnecessary-ellipsis) and GitHub code quality ("statement has no
+    effect") report them as dead. They are not. An ellipsis body is what marks
+    a method as a stub; a docstring-only body is a real body that falls off the
+    end returning None, so removing them makes pyright fail both methods with
+    "must return value on all code paths". Verified by deleting them: 2 pyright
+    errors became 4.
+    """
 
     def run(
         self, output_names: list[str] | None, input_feed: dict[str, Any]
