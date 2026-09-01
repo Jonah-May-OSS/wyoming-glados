@@ -328,7 +328,7 @@ piper_main._DEFAULT_CALLBACKS.append(
 
 piper_main._DEFAULT_CALLBACKS.append(
     ModelCheckpoint(
-        every_n_epochs=100,
+        every_n_epochs=250,
         save_top_k=-1,
         save_last=False,
         filename="periodic-epoch={epoch}-val_mel={val_mel:.4f}-val_dur={val_dur:.4f}",
