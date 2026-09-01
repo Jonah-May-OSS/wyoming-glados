@@ -7,6 +7,33 @@
 # To get a newer version, you will need to update the SHA.
 # You can also reference a tag or branch, but the action may change without warning.
 
+# Runner placement, since it is the thing most likely to be "corrected" back:
+#
+# The self-hosted runners exist for one job in this repository - the CUDA /
+# TensorRT load assertion in test.yml - and they bottleneck everything else
+# that lands on them. Nothing here needs a GPU: building an image never runs
+# CUDA. So publishing is split by architecture across free hosted runners,
+# and only the one build that genuinely cannot use them stays behind.
+#
+# The dGPU image used to be a single multi-arch build, which meant its arm64
+# slice was emulated under QEMU and a release cost amd64 + arm64 serially.
+# Split, each architecture builds natively on its own runner in parallel and
+# a merge job assembles the manifest list, so consumers still pull one tag
+# and get their own architecture.
+#
+# Native arm64 is what SBSA buys us. JetPack 7 / Thor aligned Jetson with
+# SBSA and a unified CUDA 13 install across Arm targets, which is the CUDA
+# major this stack targets (onnxruntime-gpu 1.29, tensorrt-cu13), so the
+# generic SBSA aarch64 wheels are correct for modern Jetson too - one arm64
+# build serves generic Arm servers and JetPack 7 alike, and GitHub's
+# ubuntu-24.04-arm runners are that same SBSA class.
+#
+# The iGPU image is the exception and stays emulated. JetPack 6 and the NGC
+# Tegra base predate the SBSA alignment, so a native SBSA arm64 runner is not
+# a substitute for it. It is legacy, slated for removal once JetPack 6 is
+# unsupported, and the self-hosted runner is where emulation is fastest and
+# where the LAN registry mirrors are.
+
 name: Publish Docker Images
 permissions:
   contents: read
@@ -16,32 +43,204 @@ on:
   release:
     types: [published]
 
+env:
+  IMAGE: captnspdr/wyoming-glados
+
 jobs:
-   build_and_push_images:
-    name: Build and Push Docker Images
-    runs-on: self-hosted
+  build_dgpu:
+    name: Build dGPU image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     permissions:
       packages: write
       contents: read
-      attestations: write
-      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            # Native arm64, not QEMU. See the SBSA note at the top.
+            runner: ubuntu-24.04-arm
     steps:
       - name: Check out the repo
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
 
-      # GPU driver (nvidia runtime) and Docker (dind sidecar) come from the
-      # self-hosted ARC runner; building the image doesn't need host CUDA/nvcc.
+      # Docker's data root is on /, which a hosted runner leaves ~14 GB of.
+      # The image is 8.53 GB unpacked with the builder stage's venv on top of
+      # that, so the largest preinstalled toolchains this build never touches
+      # come off first. Done inline rather than with a third-party action so
+      # nothing new is trusted with the runner. Several of these do not exist
+      # on the arm64 runner image, hence the loop rather than one rm.
+      - name: Reclaim disk for the image build
+        run: |
+          df -h /
+          for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                   /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                   /usr/share/swift; do
+            sudo rm -rf "$d"
+          done
+          sudo docker image prune --all --force
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@ba754150c9dbbaa912ae0ac3cfba43f84195cef2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract labels for Docker
+        id: meta
+        uses: docker/metadata-action@c3b064c6d7c32446d6bc214ea075f1caad2de35a
+        with:
+          images: ${{ env.IMAGE }}
+
+      # Pushed by digest, not by tag: two jobs pushing the same tag would
+      # each overwrite the other's manifest. The merge job below is what
+      # turns the two digests into one multi-arch tag.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # A cache ref per architecture. One shared ref with mode=max would
+          # have the two jobs clobbering each other's export.
+          #
+          # Without a cache every build reinstalls the venv from scratch -
+          # ~3 GB of CUDA/TensorRT/cuDNN wheels - because setup-buildx-action
+          # creates a fresh builder per job, so the Dockerfile's pip cache
+          # mount starts empty. mode=max caches the builder stage too, which
+          # is the expensive one; the default (mode=min) would only cache the
+          # final stage and miss it.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }},mode=max
+          # zstd layers: smaller pushes/pulls than gzip and much faster to
+          # decompress. The size gain is modest because almost all of this
+          # image is CUDA/TensorRT shared libraries - high-entropy, barely
+          # compressible. Decompression speed is the real win.
+          #
+          # Two different numbers get confused here, so both are stated.
+          # Measured 2026-08-31 on the dGPU image:
+          #
+          #   unpacked on disk  8.53 GB   (what `docker images` reports)
+          #   image content     3.44 GB   (what is pushed and pulled)
+          #
+          # Built with --build-arg TRT_ARCH=<arch> those become 5.27 GB /
+          # 1.90 GB, but the published image is deliberately built without it
+          # so it can compile engines on any GPU. See docker/Dockerfile.
+          #
+          # force-compression recompresses inherited layers too, otherwise
+          # they would stay gzip and most of the image would not benefit.
+          # zstd requires OCI media types. BuildKit's zstd encoder caps out
+          # below CLI zstd, so a level above ~9 is just "best available".
+          # NOTE: pulling zstd layers needs Docker 23+ / a containerd client.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,compression-level=19,force-compression=true
+
+      - name: Export the digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload the digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge_dgpu:
+    name: Publish dGPU manifest list
+    runs-on: ubuntu-latest
+    needs: [build_dgpu]
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Download the digests
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@ba754150c9dbbaa912ae0ac3cfba43f84195cef2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@c3b064c6d7c32446d6bc214ea075f1caad2de35a
+        with:
+          images: ${{ env.IMAGE }}
+
+      # One image, one tag, both architectures: the client resolves its own
+      # platform on pull. imagetools assembles a manifest from layers already
+      # in the registry, so the zstd compression chosen by the per-arch
+      # builds above is what ships - it does not recompress anything.
+      - name: Create the manifest list and push it
+        working-directory: /tmp/digests
+        run: |
+          # Built as an array rather than relying on word splitting, so
+          # a tag or digest is never re-split and no shellcheck
+          # suppression is needed to say that is fine.
+          args=()
+          while IFS= read -r tag; do
+            args+=(-t "$tag")
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          for digest in *; do
+            args+=("${IMAGE}@sha256:${digest}")
+          done
+          docker buildx imagetools create "${args[@]}"
+
+      - name: Inspect the published tag
+        run: docker buildx imagetools inspect "${IMAGE}:${{ steps.meta.outputs.version }}"
+
+  build_igpu:
+    # LEGACY: JetPack 6 only, and the one build that cannot move to a hosted
+    # runner. Before JetPack 7 moved Jetson to SBSA, Tegra needed CUDA and
+    # TensorRT builds distinct from the SBSA aarch64 wheels that pip ships,
+    # which is why this separate image exists - and why a native SBSA arm64
+    # runner is not a substitute for emulating it. JetPack 7 and newer pull
+    # the multi-arch image above instead.
+    #
+    # Slated for removal once JetPack 6 is no longer supported. It has never
+    # been validated on Jetson hardware - see the note in Dockerfile.igpu.
+    name: Build and push iGPU (Jetson, JetPack 6) image
+    runs-on: self-hosted
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@f4e8deed0c3c26542279f4042c0e1d059cbf012d
         with:
-          platforms: all
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
         with:
           # Route image pulls through the lab's pull-through registry caches.
-          # LAN-only mirrors; buildkit falls back to the upstream registry if
-          # a mirror is unreachable (e.g. on a GitHub-hosted runner).
+          # LAN-only mirrors, which is one more reason this job stays here;
+          # buildkit falls back to the upstream registry if one is
+          # unreachable.
           buildkitd-config-inline: |
             [registry."docker.io"]
               mirrors = ["192.168.7.45:5000"]
@@ -62,81 +261,14 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@c3b064c6d7c32446d6bc214ea075f1caad2de35a
-        with:
-          images: captnspdr/wyoming-glados
-
-      # One image, one tag, both architectures: buildx publishes a manifest
-      # list and the client resolves its own platform on pull. The arm64 slice
-      # is built from the same Dockerfile as amd64 - there is no ARM-specific
-      # variant to maintain.
-      #
-      # arm64 covers generic Arm servers AND JetPack 7 / Jetson Thor, which
-      # aligned with SBSA and a unified CUDA 13 install across Arm targets.
-      # That is the CUDA major this stack targets (onnxruntime-gpu 1.29,
-      # tensorrt-cu13), so the SBSA aarch64 wheels are the correct build.
-      - name: Build and Push dGPU Image (multi-arch)
-        id: push-dgpu
-        uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-          # Layer cache. Without it every build reinstalls the venv from
-          # scratch - ~3 GB of CUDA/TensorRT/cuDNN wheels - because
-          # setup-buildx-action creates a fresh builder per job, so the
-          # Dockerfile's pip cache mount starts empty. mode=max caches the
-          # builder stage too, which is the expensive one; the default
-          # (mode=min) would only cache the final stage and miss it.
-          cache-from: type=registry,ref=captnspdr/wyoming-glados:buildcache
-          cache-to: type=registry,ref=captnspdr/wyoming-glados:buildcache,mode=max
-          # zstd layers: smaller pushes/pulls than gzip and much faster to
-          # decompress. The size gain is modest because almost all of this
-          # image is CUDA/TensorRT shared libraries - high-entropy, barely
-          # compressible. Decompression speed is the real win.
-          #
-          # Two different numbers get confused here, so both are stated.
-          # Measured 2026-08-31 on the dGPU image:
-          #
-          #   unpacked on disk  8.53 GB   (what `docker images` reports)
-          #   image content     3.44 GB   (what is pushed and pulled)
-          #
-          # An earlier version of this comment called 3.62 GB "uncompressed".
-          # It cannot have been: site-packages alone is 4.7 GB unpacked. That
-          # figure was the compressed content size, which is the number worth
-          # tracking anyway - it is what crosses the network.
-          #
-          # Built with --build-arg TRT_ARCH=<arch> those become 5.27 GB / 1.90
-          # GB, but the published image is deliberately built without it so it
-          # can compile engines on any GPU. See docker/Dockerfile.
-          #
-          # force-compression recompresses inherited layers too, otherwise
-          # they would stay gzip and most of the image would not benefit.
-          # zstd requires OCI media types. BuildKit's zstd encoder caps out
-          # below CLI zstd, so a level above ~9 is just "best available".
-          # NOTE: pulling zstd layers needs Docker 23+ / a containerd-era client.
-          outputs: type=image,oci-mediatypes=true,compression=zstd,compression-level=19,force-compression=true
-
       - name: Extract metadata (tags, labels) for iGPU
         id: meta-igpu
         uses: docker/metadata-action@c3b064c6d7c32446d6bc214ea075f1caad2de35a
         with:
-          images: captnspdr/wyoming-glados
+          images: ${{ env.IMAGE }}
           flavor: |
             suffix=-igpu,onlatest=true
 
-      # LEGACY: JetPack 6 only. Before JetPack 7 moved Jetson to SBSA, Tegra
-      # needed CUDA and TensorRT builds distinct from the SBSA aarch64 wheels
-      # that pip ships, which is why this separate image exists. JetPack 7 and
-      # newer should pull the multi-arch image above instead.
-      #
-      # Slated for removal once JetPack 6 is no longer supported. It has never
-      # been validated on Jetson hardware - see the note in Dockerfile.igpu.
       - name: Build and Push iGPU (Jetson) Image
         id: push-igpu
         uses: docker/build-push-action@83bfd93ab480705a7b99a2ed02765137f5ab55ba
@@ -149,7 +281,7 @@ jobs:
           platforms: linux/arm64
           # Its own cache ref: a different Dockerfile with different
           # layers, which would evict the dGPU cache if they shared one.
-          cache-from: type=registry,ref=captnspdr/wyoming-glados:buildcache-igpu
-          cache-to: type=registry,ref=captnspdr/wyoming-glados:buildcache-igpu,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-igpu
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-igpu,mode=max
           # zstd layers, same as the dGPU image above.
           outputs: type=image,oci-mediatypes=true,compression=zstd,compression-level=19,force-compression=true

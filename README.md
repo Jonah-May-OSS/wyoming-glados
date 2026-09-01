@@ -163,7 +163,21 @@ services:
               capabilities: [gpu]
 ```
 
-For Jetson devices (iGPU), use the `-igpu` image tag instead:
+#### Which image does a Jetson need?
+
+It depends on the JetPack version, because that is where Jetson's CPU
+architecture story changes:
+
+| Device | Image | Why |
+| --- | --- | --- |
+| **JetPack 7 and newer** (Thor) | `captnspdr/wyoming-glados:latest` | JetPack 7 aligned Jetson with **SBSA**, the standard Arm server architecture, and moved to a unified CUDA 13 install across Arm targets. The generic `arm64` slice of the main image is built from the SBSA aarch64 wheels, so it is the correct build - use the same tag as any other machine. |
+| **JetPack 6 and older** | `captnspdr/wyoming-glados:latest-igpu` | Pre-SBSA Tegra needs CUDA and TensorRT builds distinct from the SBSA aarch64 wheels pip ships, which is the entire reason this separate image exists. |
+
+The `-igpu` image is **legacy** and is slated for removal once JetPack 6 is no
+longer supported. It has also never been validated on Jetson hardware; if you
+run it, please report what happens.
+
+For JetPack 6 and older, use the `-igpu` image tag instead:
 ```yaml
 version: "3"
 services:
