@@ -20,8 +20,33 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   espeak-ng libespeak-ng-dev \
   ffmpeg python3-pip python3-venv python3-dev git
 
-log "Cloning piper1-gpl into $PIPER_DIR"
-[ -d "$PIPER_DIR" ] || git clone --depth 1 https://github.com/OHF-voice/piper1-gpl.git "$PIPER_DIR"
+# Pinned to an immutable commit, and checked even when the directory already
+# exists. `--depth 1` of a moving branch installs whatever upstream happens to
+# be that day, and `pip install -e .[train]` executes that code - so an
+# unpinned clone is an unreviewed dependency with a build step. The existing
+# directory guard made it worse: once anything was at $PIPER_DIR it was
+# installed unverified, so a stale or altered checkout was never noticed.
+PIPER_REPO="${PIPER_REPO:-https://github.com/OHF-voice/piper1-gpl.git}"
+PIPER_COMMIT="${PIPER_COMMIT:-850c45a3d70b5981de4d908ba98caf39796e7201}"
+
+log "Cloning piper1-gpl at $PIPER_COMMIT into $PIPER_DIR"
+if [ ! -d "$PIPER_DIR/.git" ]; then
+  # Fetch the one commit rather than clone-then-checkout, so no other revision
+  # is ever written to disk.
+  git init -q "$PIPER_DIR"
+  git -C "$PIPER_DIR" remote add origin "$PIPER_REPO"
+  git -C "$PIPER_DIR" fetch -q --depth 1 origin "$PIPER_COMMIT"
+  git -C "$PIPER_DIR" checkout -q FETCH_HEAD
+fi
+
+actual_commit="$(git -C "$PIPER_DIR" rev-parse HEAD)"
+if [ "$actual_commit" != "$PIPER_COMMIT" ]; then
+  echo "piper1-gpl at $PIPER_DIR is $actual_commit, expected $PIPER_COMMIT" >&2
+  echo "Refusing to install unverified sources. Remove the directory to re-clone," >&2
+  echo "or set PIPER_COMMIT if you mean to move to a newer revision." >&2
+  exit 1
+fi
+
 cd "$PIPER_DIR"
 
 log "Creating venv"

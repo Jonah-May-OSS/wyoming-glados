@@ -5,11 +5,14 @@ import urllib.error
 import pytest
 
 from dataset_tools.fetch import (
+    ALLOWED_HOSTS,
+    MAX_DOWNLOAD_BYTES,
     FetchError,
     fetch_audio,
     fetch_pages,
     fetch_with_retries,
     find_filename_collisions,
+    http_opener,
     is_wav_complete,
     safe_filename,
 )
@@ -210,3 +213,42 @@ class TestMalformedUrls:
         assert report.downloaded == 1
         assert len(report.failures) == 1
         assert (tmp_path / "good.wav").exists()
+
+
+class TestDownloadDestinationIsRestricted:
+    """Every URL fetched comes from wiki HTML, so targets are untrusted.
+
+    Anyone able to edit a page can point a link at localhost, at a cloud
+    metadata endpoint, or at anything else reachable from the machine running
+    the crawl.
+    """
+
+    def test_a_host_outside_the_allowlist_is_refused(self):
+        opener = http_opener()
+        with pytest.raises(FetchError, match="not in ALLOWED_HOSTS"):
+            opener("https://evil.example.com/a.wav")
+
+    def test_loopback_is_refused(self):
+        opener = http_opener()
+        with pytest.raises(FetchError, match="not in ALLOWED_HOSTS"):
+            opener("https://127.0.0.1/a.wav")
+
+    def test_cloud_metadata_endpoint_is_refused(self):
+        opener = http_opener()
+        with pytest.raises(FetchError, match="not in ALLOWED_HOSTS"):
+            opener("https://169.254.169.254/latest/meta-data/")
+
+    def test_plain_http_is_refused_even_on_an_allowed_host(self):
+        # Downgrading to http would expose the crawl to tampering in transit,
+        # so the scheme is checked before the host.
+        opener = http_opener()
+        allowed = next(iter(ALLOWED_HOSTS))
+        with pytest.raises(FetchError, match="non-HTTPS"):
+            opener(f"http://{allowed}/a.wav")
+
+    def test_the_wiki_itself_is_allowed(self):
+        assert "theportalwiki.com" in ALLOWED_HOSTS
+
+    def test_the_size_cap_is_smaller_than_available_memory(self):
+        # A guard that is effectively unbounded is not a guard.
+        assert 0 < MAX_DOWNLOAD_BYTES <= 64 * 1024 * 1024

@@ -304,42 +304,54 @@ def test_ensure_model_exists_download_exception_hits_except(
     assert not file_path.exists()
 
 
-# ================================================================
-# ensure_model_exists — MD5 mismatch AFTER download (lines 134–156)
-# ================================================================
-def test_ensure_model_exists_md5_mismatch_after_download(tmp_path, monkeypatch, caplog):
-    """Exercise the post-download MD5 mismatch error branch."""
-    file_path = tmp_path / "glados.onnx"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+def test_a_sidecar_failing_verification_is_never_committed(tmp_path):
+    """A download that fails verification must not replace a working voice.
 
-    # First model invalid → triggers download
+    Verification used to run AFTER the sidecar was renamed into place, so the
+    only response to a bad file was to delete what had just overwritten a
+    working voice - leaving the deployment with nothing to serve. Checking the
+    sidecar first means a bad hash aborts the set exactly like a failed
+    transfer, and the existing voice is left alone.
+    """
+    good = b"g" * 2048
+    corrupt = b"c" * 4096
+    base_url = "https://example.com/{file}"
+    model_paths = [tmp_path / "glados.onnx", tmp_path / "glados.onnx.json"]
+    for path in model_paths:
+        path.write_bytes(good)
+
+    def fake_urlopen(request_or_url, *_args, **_kwargs):
+        response = MagicMock()
+        response.__enter__ = lambda self: self
+        response.__exit__ = lambda _self, *_exc: False
+        # A different length from what is on disk, so the files read as stale
+        # and are refetched.
+        response.headers = {"Content-Length": str(len(corrupt))}
+        # Default "GET": phase 1 passes a bare URL string, which has no
+        # get_method. Defaulting to HEAD there returns a response with no read
+        # configured, and every fetch dies on a TypeError before verification
+        # is reached - which looks exactly like the test passing.
+        if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
+            return response
+        response.read = MagicMock(side_effect=[corrupt, b""])
+        return response
+
+    # Keyed on CONTENT, not on filename: the fetched bytes are bad wherever
+    # they end up, which is what the post-rename check could not act on
+    # without having already destroyed the file underneath.
     def fake_is_valid(path, _md5):
-        return path.name != "glados.onnx"
+        return path.exists() and path.read_bytes() != corrupt
 
-    monkeypatch.setattr(download, "is_valid_file", fake_is_valid)
+    with (
+        patch("download.is_valid_file", side_effect=fake_is_valid),
+        patch("download.urlopen", side_effect=fake_urlopen),
+    ):
+        assert ensure_model_exists(tmp_path, base_url) is False
 
-    # Download succeeds
-    monkeypatch.setattr(
-        download,
-        "urlopen",
-        lambda *_a, **_kw: MagicMock(
-            __enter__=lambda _s: io.BytesIO(b"x" * 4096),
-            __exit__=lambda *_exc: False,
-        ),
-    )
-
-    # Force MD5 mismatch after download
-    monkeypatch.setattr(download, "get_file_hash", lambda *_a: "WRONGHASH")
-
-    monkeypatch.setattr(
-        download.shutil, "copyfileobj", lambda src, dst: dst.write(src.read())
-    )
-
-    with caplog.at_level(logging.ERROR):
-        ensure_model_exists(tmp_path, download.DEFAULT_URL)
-
-    assert "MD5 hash mismatch after download" in caplog.text
-    assert not file_path.exists()
+    for path in model_paths:
+        assert path.exists(), "a failed verification deleted the working voice"
+        assert path.read_bytes() == good, "the working voice was overwritten"
+        assert not path.with_suffix(path.suffix + ".part").exists()
 
 
 # ================================================================

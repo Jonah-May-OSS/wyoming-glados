@@ -297,6 +297,20 @@ def ensure_model_exists(
                 raise OSError(
                     f"{model_url}: expected {expected_bytes} bytes, received {written}"
                 )
+            # Verify BEFORE the rename, not after. Verifying a committed file
+            # cannot fail safely: the rename has already destroyed the working
+            # voice it replaced, so the only move left is to delete the bad
+            # copy and leave the deployment with no voice at all.
+            #
+            # This was unreachable while every md5 was None, and publishing
+            # real checksums is what armed it. A republished tag, or a
+            # VOICE_RELEASE bump landing before the hashes are updated, would
+            # then have made every refresh destroy a working install.
+            #
+            # Raising here routes a bad checksum through the same path as a
+            # failed transfer, which the two-phase commit already handles.
+            if not is_valid_file(part_path, model["md5"]):
+                raise OSError(f"{model_url}: downloaded file failed verification")
             fetched.append((model, model_file_path, part_path))
         except Exception:
             _LOGGER.exception(
@@ -323,16 +337,10 @@ def ensure_model_exists(
                 model_file_path.unlink()
         return False
 
-    for model, model_file_path, part_path in fetched:
+    # Every sidecar here was verified in phase 1, so this loop only commits.
+    for _model, model_file_path, part_path in fetched:
         part_path.replace(model_file_path)
-        _LOGGER.info("Downloaded %s", model_file_path)
-        if is_valid_file(model_file_path, model["md5"]):
-            _LOGGER.info("Verified MD5 hash for %s.", model_file_path)
-        else:
-            _LOGGER.error("MD5 hash mismatch after download for %s.", model_file_path)
-            if model_file_path.exists():
-                model_file_path.unlink()
-            all_present = False
+        _LOGGER.info("Downloaded and verified %s", model_file_path)
 
     return all_present
 

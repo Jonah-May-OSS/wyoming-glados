@@ -46,6 +46,19 @@ jobs:
     needs: wait_for_checks
     name: "Build and Test on Linux (self-hosted runner)"
     runs-on: self-hosted
+    # Same-repo pull requests only.
+    #
+    # This job checks out the pull request's code and runs it on hardware we
+    # own - installing its requirements files, then starting its server. A
+    # fork PR could point requirements-piper.txt at any sdist or VCS URL, and
+    # pip executes build code during installation, so opening a PR would be
+    # enough to run arbitrary code on the runner. A read-only GITHUB_TOKEN
+    # does not help with that; the exposure is the machine, not the token.
+    #
+    # A fork PR therefore skips this job and needs a maintainer to run it from
+    # a branch in this repository after reading the diff. ruff.yml already
+    # guards its push step on the same condition.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       # 1. Checkout the repository code
       - name: Checkout Code

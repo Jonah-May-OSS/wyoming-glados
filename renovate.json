@@ -18,7 +18,7 @@
   "packageRules": [
     {
       "groupName": "ONNX Runtime + TensorRT",
-      "description": "onnxruntime-gpu and tensorrt-cu13 are coupled: onnxruntime-gpu links libnvinfer.so.10, so they must move together or the TensorRT provider silently fails to load.",
+      "description": "onnxruntime-gpu and tensorrt-cu13 are coupled: onnxruntime-gpu links libnvinfer.so.10, so they must move together or the TensorRT provider silently fails to load. Automerge here is only safe because the docker-build-check job resolves libonnxruntime_providers_tensorrt.so against the shipped tensorrt_libs with ldd, so a soname drift fails the PR instead of merging quietly. Do not automerge this group if that check is ever removed or weakened to an availability listing, which reports a provider that cannot actually load.",
       "matchPackageNames": [
         "onnxruntime-gpu",
         "tensorrt-cu13"

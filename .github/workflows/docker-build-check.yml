@@ -104,6 +104,38 @@ jobs:
                 print('tensorrt', tensorrt.__version__); \
                 print('providers', providers)"
 
+      # The lockstep between onnxruntime-gpu and tensorrt-cu13, enforced.
+      #
+      # The step above only asserts TensorrtExecutionProvider is LISTED, and
+      # availability is not loadability: onnxruntime reports a provider it was
+      # compiled with even when the .so behind it cannot resolve its
+      # dependencies. That is precisely the soname break these two packages can
+      # drift into - the provider stays listed, session creation quietly falls
+      # back to CUDA, and throughput drops ~5x with nothing in the logs.
+      #
+      # renovate.json automerges minor/patch bumps of this pair on the strength
+      # of this check, so it has to be the strong one. ldd resolves the
+      # provider library against the shipped tensorrt_libs: an soname the
+      # installed TensorRT does not provide shows up as "not found" here,
+      # without needing a GPU.
+      - name: TensorRT provider library must resolve (enforces the ORT/TRT pin)
+        run: |
+          docker run --rm --entrypoint sh wyoming-glados:build-check -c '
+            set -e
+            VENV=/usr/src/wyoming-glados/venv
+            SO=$(find "$VENV" -name "libonnxruntime_providers_tensorrt.so" | head -1)
+            [ -n "$SO" ] || { echo "FAIL: TensorRT provider library not found"; exit 1; }
+            TL=$(find "$VENV" -type d -name tensorrt_libs | head -1)
+            echo "provider: $SO"
+            MISSING=$(LD_LIBRARY_PATH="$TL" ldd "$SO" | grep "not found" || true)
+            if [ -n "$MISSING" ]; then
+              echo "FAIL: unresolved libraries - onnxruntime-gpu and tensorrt-cu13 have drifted"
+              echo "$MISSING"
+              exit 1
+            fi
+            LD_LIBRARY_PATH="$TL" ldd "$SO" | grep -i nvinfer || true
+            echo "TensorRT provider resolves OK"'
+
       # onnxruntime-gpu and the CPU-only onnxruntime package own the same
       # module, so if both land the CPU build wins and CUDA/TensorRT vanish
       # with no error - just ~5x less throughput. piper-tts depends on the CPU

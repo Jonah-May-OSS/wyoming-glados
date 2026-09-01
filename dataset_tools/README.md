@@ -73,7 +73,7 @@ Lines whose transcript is only a wiki annotation (`[hums a tune]`,
 
 Built with `--max-seconds 20` (see the long-clip tail below):
 
-```
+```text
 Speaker      clips   duration
   dota2        405     20.0 min
   p1           229     21.2 min
@@ -240,7 +240,7 @@ RTX 4080, to de-risk Phase 3 before training.
 
 **Verdict: viable, ~3x faster, but with caveats.**
 
-```
+```text
 CUDA EP     min 15.3 ms   median 26.9 ms
 TRT fp16    min  6.0 ms   median  8.5 ms
 TRT fp32    min  5.5 ms   median  7.5 ms

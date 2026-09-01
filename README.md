@@ -232,7 +232,8 @@ in the shipped games are still usable.
 
 ```bash
 python -m dataset_tools fetch                      # wiki pages + audio
-python -m dataset_tools build --max-seconds 20 \n    --multi-speaker --potato-speaker               # normalise, write metadata.csv
+python -m dataset_tools build --max-seconds 20 \
+    --multi-speaker --potato-speaker         # normalise, write metadata.csv
 dataset_tools/setup_wsl.sh                         # one-time training env
 dataset_tools/train_glados.sh                      # fine-tune from LJSpeech
 dataset_tools/export_glados.sh                     # checkpoint -> TensorRT-ready ONNX

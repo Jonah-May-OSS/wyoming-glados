@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from dataset_tools.audio import (
+    MAX_DECODE_FRAMES,
     TARGET_RATE,
     AudioError,
     low_mid_ratio_db,
@@ -259,3 +260,56 @@ class TestMalformedAudio:
         monkeypatch.setattr(wave, "open", lambda p, m="rb": Truncated(real_open(p, m)))
         with pytest.raises(AudioError, match="truncated or malformed"):
             read_wav(path)
+
+
+class TestDecodeIsBounded:
+    def test_a_header_claiming_absurd_length_is_rejected_before_decoding(
+        self, tmp_path, monkeypatch
+    ):
+        """The frame count comes from the file, so it cannot size an allocation.
+
+        readframes(getnframes()) allocates from a number the file supplies. A
+        corrupt or crafted header could ask for gigabytes from a clip that is
+        actually a few seconds long, and the duration check downstream only
+        runs once the decode has already finished.
+        """
+        path = tmp_path / "huge.wav"
+        write_wav(path, np.zeros(1000, dtype=np.float32), RATE)
+
+        real_open = wave.open
+
+        class LyingHeader:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self._inner.close()
+                return False
+
+            def getnchannels(self):
+                return self._inner.getnchannels()
+
+            def getsampwidth(self):
+                return self._inner.getsampwidth()
+
+            def getframerate(self):
+                return self._inner.getframerate()
+
+            def getnframes(self):
+                return MAX_DECODE_FRAMES + 1
+
+            def readframes(self, _n):
+                raise AssertionError("decoded despite an out-of-range header")
+
+        monkeypatch.setattr(
+            wave, "open", lambda p, m="rb": LyingHeader(real_open(p, m))
+        )
+        with pytest.raises(AudioError, match="over the .* limit"):
+            read_wav(path)
+
+    def test_the_cap_admits_any_real_voice_line(self):
+        # Ten minutes at 48 kHz, against a corpus of few-second clips.
+        assert MAX_DECODE_FRAMES >= 48_000 * 60

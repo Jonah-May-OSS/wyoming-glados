@@ -69,8 +69,31 @@ NUM_SPEAKERS="${NUM_SPEAKERS:-1}"
 # Set to a checkpoint path to continue an interrupted run in place.
 RESUME_CKPT="${RESUME_CKPT:-}"
 
-CKPT_URL="https://huggingface.co/datasets/rhasspy/piper-checkpoints/resolve/main/en/en_US/ljspeech/medium/lj-med_1000.ckpt"
+# Pinned to an immutable dataset revision, not `main`. Every training run
+# starts from this file, so "whatever main points at today" makes the starting
+# weights change under you between runs - and silently, since the existence
+# check below skips the download entirely once anything is cached.
+CKPT_REVISION="efe37e4373987e1ae3103d60c0123bb4bb3e1aee"
+CKPT_URL="https://huggingface.co/datasets/rhasspy/piper-checkpoints/resolve/$CKPT_REVISION/en/en_US/ljspeech/medium/lj-med_1000.ckpt"
+# Hugging Face publishes no SHA-256 for this file, so this is recorded from the
+# copy this project actually trained against. It pins provenance rather than
+# vouching for upstream: a changed hash means the bytes are not the ones the
+# published voice was built on, and that is worth stopping for.
+CKPT_SHA256="dcf2449bdbdaad09256a08dfac211c59f6b36ce8d3f244fd844a9eb1d7384c7c"
 CKPT="$DATA_DIR/ljspeech-medium.ckpt"
+
+verify_ckpt() {
+  # Verifies whatever is at $CKPT, downloaded or cached. A cached file was
+  # previously trusted on the strength of its existence alone, so a truncated
+  # or swapped checkpoint survived every later run.
+  actual="$(sha256sum "$1" | cut -d" " -f1)"
+  [ "$actual" = "$CKPT_SHA256" ] || {
+    echo "Checkpoint SHA-256 mismatch for $1" >&2
+    echo "  expected $CKPT_SHA256" >&2
+    echo "  actual   $actual" >&2
+    return 1
+  }
+}
 
 if [ ! -f "$CKPT" ]; then
   echo "Downloading public-domain LJSpeech medium checkpoint (846 MB)"
@@ -78,7 +101,12 @@ if [ ! -f "$CKPT" ]; then
   # a .part rename so an interrupted transfer cannot be mistaken for a
   # complete one on the next run - the existence check above is the only gate.
   curl -sSL --fail -o "$CKPT.part" "$CKPT_URL"
+  # Verified BEFORE the rename, so a bad download never becomes the cached
+  # checkpoint that later runs skip re-fetching.
+  verify_ckpt "$CKPT.part" || { rm -f "$CKPT.part"; exit 1; }
   mv "$CKPT.part" "$CKPT"
+else
+  verify_ckpt "$CKPT" || exit 1
 fi
 
 # See note 2 above. Regenerated on every run, NOT written only when absent:

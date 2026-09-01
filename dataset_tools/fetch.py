@@ -51,15 +51,71 @@ class FetchReport:
         return not self.failures
 
 
+# Hosts this crawler is allowed to talk to.
+#
+# Every URL it fetches comes from parsing wiki HTML, so the target set is
+# attacker-influenced: anyone who can edit a page can point a link at
+# 127.0.0.1, at a cloud metadata endpoint, or at any host reachable from
+# whoever runs the crawl. Restricting the destination is what stops an edit
+# from turning this into a request forgery.
+ALLOWED_HOSTS = frozenset(
+    {
+        "theportalwiki.com",
+        "wiki.portal2.com",
+        "steamcdn-a.akamaihd.net",
+    }
+)
+
+# Ceiling on a single download. The corpus is ~1,800 short voice lines; the
+# largest is a few hundred KB. Without a cap, response.read() sizes the buffer
+# from whatever the server sends, so one hostile or broken URL can exhaust
+# memory before anything gets a chance to reject it.
+MAX_DOWNLOAD_BYTES = 32 * 1024 * 1024
+
+
+def _check_url(url: str) -> str:
+    """Return `url` if it targets an allowed HTTPS host, else raise.
+
+    Applied to redirects as well as the initial request: an allowed host that
+    answers with a 302 to somewhere else would otherwise walk straight past a
+    check done only at the start.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https":
+        raise FetchError(f"{url}: refusing a non-HTTPS URL")
+    host = (parsed.hostname or "").lower()
+    if host not in ALLOWED_HOSTS:
+        raise FetchError(f"{url}: host {host!r} is not in ALLOWED_HOSTS")
+    return url
+
+
+class _AllowlistRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-check every redirect target against the allowlist."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Reject a redirect that leaves the allowlist, then defer upstream."""
+        _check_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def http_opener(
     *, user_agent: str = USER_AGENT, timeout: float = DEFAULT_TIMEOUT
 ) -> Opener:
     """Build an opener that issues real HTTP requests."""
+    opener = urllib.request.build_opener(_AllowlistRedirectHandler)
 
     def _open(url: str) -> bytes:
-        request = urllib.request.Request(url, headers={"User-Agent": user_agent})
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return bytes(response.read())
+        request = urllib.request.Request(
+            _check_url(url), headers={"User-Agent": user_agent}
+        )
+        with opener.open(request, timeout=timeout) as response:
+            # One byte past the cap, so a body sitting exactly on the limit is
+            # accepted and anything larger is detectable without reading it
+            # all.
+            body = bytes(response.read(MAX_DOWNLOAD_BYTES + 1))
+        if len(body) > MAX_DOWNLOAD_BYTES:
+            raise FetchError(f"{url}: response exceeds {MAX_DOWNLOAD_BYTES} bytes")
+        return body
 
     return _open
 

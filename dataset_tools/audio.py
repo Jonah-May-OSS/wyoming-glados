@@ -35,6 +35,11 @@ _INT16_MAX = 32767.0
 # Sample width in BYTES, as returned by wave: 2 == 16-bit PCM.
 _PCM16_SAMPLE_WIDTH = 2
 
+# Ceiling on frames decoded from one file. 10 minutes at 48 kHz, against a
+# corpus whose longest voice line is a few seconds - generous enough never
+# to reject real input, small enough that a bad header cannot exhaust memory.
+MAX_DECODE_FRAMES = 48_000 * 60 * 10
+
 
 class AudioError(RuntimeError):
     """A source file could not be decoded."""
@@ -63,7 +68,19 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
             channels = handle.getnchannels()
             width = handle.getsampwidth()
             rate = handle.getframerate()
-            frames = handle.readframes(handle.getnframes())
+            declared_frames = handle.getnframes()
+            # Checked BEFORE readframes, from the header rather than from what
+            # arrives. readframes(getnframes()) sizes its allocation from a
+            # number the file supplies, so a crafted or corrupt header makes
+            # this decode allocate far more than the clip could possibly need.
+            # The corpus is ~1,800 voice lines of a few seconds each, so a
+            # clip past this bound is not a clip worth decoding.
+            if declared_frames > MAX_DECODE_FRAMES:
+                raise AudioError(
+                    f"{path}: declares {declared_frames} frames, "
+                    f"over the {MAX_DECODE_FRAMES} limit"
+                )
+            frames = handle.readframes(declared_frames)
     except (wave.Error, OSError) as exc:
         raise AudioError(f"{path}: {exc}") from exc
 
