@@ -1,0 +1,83 @@
+# syntax=docker/dockerfile:1
+
+# ===========================================================================
+# Builds ONNX Runtime for aarch64 WITH the TensorRT execution provider.
+#
+# Why this exists: onnxruntime-gpu publishes no aarch64 wheel containing
+# libonnxruntime_providers_tensorrt.so. Verified against the 1.29.0 release
+# and the 1.30.0.dev20260901001 nightly - 354 entries each, CUDA provider and
+# shared provider only. No flag, extra index or version bump turns it on, so
+# TensorRT on ARM has to be compiled.
+#
+# This is NOT part of the image build. It is driven by
+# .github/workflows/ort-aarch64-wheel.yml, which builds the wheel once per
+# onnxruntime version and publishes it as a release asset; docker/Dockerfile
+# then downloads that wheel. A release therefore never pays for this compile
+# - only a version bump does, and it pays once rather than once per
+# architecture per release.
+#
+# The NGC TensorRT image is the base because it carries exactly what a source
+# build needs and the pip wheels do not: nvcc, the CUDA headers, cuDNN and
+# NvInfer.h. It is multi-arch, so on an arm64 builder this resolves to the
+# SBSA aarch64 variant.
+# ===========================================================================
+FROM nvcr.io/nvidia/tensorrt:26.02-py3 AS builder
+
+# Same apt resilience as the image build: without a timeout apt can hang
+# indefinitely on a half-open fetch.
+RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99network-resilience \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        cmake \
+        build-essential \
+        python3-dev \
+        python3-pip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Pinned by the caller from requirements.txt, so the compiled wheel is always
+# the same onnxruntime version the pin describes. A mismatch would put a
+# different ONNX Runtime in the image than the requirements file claims.
+ARG ORT_REF=v1.29.0
+
+RUN git clone --depth 1 --branch "$ORT_REF" --recursive \
+        https://github.com/microsoft/onnxruntime /src/onnxruntime
+
+WORKDIR /src/onnxruntime
+
+# --allow_running_as_root: this runs as root inside a container.
+# --skip_tests: the suite needs a GPU, and no builder has one.
+# --compile_no_warning_as_error: a release branch that warns on a newer
+#   toolchain should not fail the build.
+#
+# CMAKE_CUDA_ARCHITECTURES is deliberately short. Every architecture listed
+# is compiled separately and this is by far the longest step, so the list
+# covers the Arm targets that actually exist rather than everything CUDA
+# supports: 87 = Orin, 90 = Hopper/GH200, 100 = Blackwell/GB200, 110 = Thor.
+ARG CUDA_ARCHS=87;90;100;110
+RUN ./build.sh \
+        --config Release --update --build --parallel \
+        --build_wheel --skip_tests --allow_running_as_root \
+        --compile_no_warning_as_error \
+        --use_cuda --use_tensorrt \
+        --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
+        --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
+
+# Fail here rather than shipping a wheel without the very provider this
+# whole file exists to produce.
+RUN set -eu; \
+    mkdir -p /ortwheel; \
+    cp build/Linux/Release/dist/*.whl /ortwheel/; \
+    cd /ortwheel; \
+    WHEEL="$(ls ./*.whl)"; \
+    python3 -c "import sys, zipfile; \
+names = zipfile.ZipFile(sys.argv[1]).namelist(); \
+target = 'onnxruntime/capi/libonnxruntime_providers_tensorrt.so'; \
+sys.exit(0) if target in names else sys.exit('built wheel has no ' + target)" \
+      "$WHEEL"; \
+    sha256sum ./*.whl > SHA256SUMS.txt; \
+    cat SHA256SUMS.txt
+
+# Export stage: `--output type=local` on this yields just the wheel and its
+# checksum file, not the multi-gigabyte build tree.
+FROM scratch AS export
+COPY --from=builder /ortwheel/ /

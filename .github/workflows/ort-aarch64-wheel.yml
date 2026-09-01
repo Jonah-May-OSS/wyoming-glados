@@ -1,0 +1,155 @@
+---
+# Builds the aarch64 ONNX Runtime wheel that has the TensorRT execution
+# provider, once per onnxruntime version, and publishes it as a release
+# asset.
+#
+# The problem it solves: onnxruntime-gpu ships no aarch64 wheel with
+# libonnxruntime_providers_tensorrt.so, so the only way to get TensorRT on
+# ARM is to compile ONNX Runtime. Doing that inside docker/Dockerfile would
+# put a full CUDA compile on the critical path of every release, for both
+# architectures, every time. Doing it here puts it on the critical path of a
+# version bump instead - and only the arm64 half of one.
+#
+# The version is read from requirements.txt rather than configured
+# separately, so the wheel is always the onnxruntime the pin describes.
+# renovate.json automerges minor and patch bumps of onnxruntime-gpu, which is
+# exactly the event that needs a fresh wheel, so this triggers on pushes that
+# touch that file.
+#
+# Already-built versions are skipped. The check is for the release asset
+# itself, not a marker, so a half-finished publish is retried rather than
+# recorded as done.
+name: ONNX Runtime aarch64 wheel
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "requirements.txt"
+      - "docker/Dockerfile.ortwheel"
+      - ".github/workflows/ort-aarch64-wheel.yml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild even if the wheel is already published"
+        type: boolean
+        default: false
+
+jobs:
+  resolve:
+    name: Which onnxruntime version, and is it already built?
+    runs-on: ubuntu-latest
+    outputs:
+      ort_ref: ${{ steps.v.outputs.ort_ref }}
+      tag: ${{ steps.v.outputs.tag }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+
+      - name: Read the pin and look for an existing wheel
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          # onnxruntime-gpu[cuda,cudnn]~=1.29.0  ->  v1.29.0
+          version="$(sed -n 's/^onnxruntime-gpu.*[~=><]=*[[:space:]]*\([0-9][0-9.]*\).*/\1/p' \
+                       requirements.txt | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error::Could not read the onnxruntime-gpu version from requirements.txt"
+            exit 1
+          fi
+          ort_ref="v${version}"
+          tag="ort-aarch64-${ort_ref}"
+          echo "ort_ref=$ort_ref" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          needed=true
+          if [ "$FORCE" != "true" ] \
+             && gh release view "$tag" --json assets \
+                  --jq '.assets[].name' 2>/dev/null | grep -q '\.whl$'; then
+            needed=false
+          fi
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
+          echo "onnxruntime $ort_ref -> release $tag, build needed: $needed"
+
+  build:
+    name: Compile ONNX Runtime + TensorRT (aarch64, native)
+    needs: [resolve]
+    if: needs.resolve.outputs.needed == 'true'
+    # Native arm64 rather than QEMU: emulating a CUDA compile is the one
+    # thing guaranteed to make this unaffordable. Free for public repos.
+    runs-on: ubuntu-24.04-arm
+    # Just under the hosted-runner cap, so a build that does not fit records
+    # that fact instead of being killed with nothing to show. If this ever
+    # trips, THAT is the evidence for moving the job to a self-hosted runner.
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+
+      - name: Report the machine
+        run: |
+          echo "cores:  $(nproc)"
+          echo "memory: $(free -g | awk '/^Mem:/{print $2}') GB"
+          echo "arch:   $(uname -m)"
+
+      # The NGC base is large and the ONNX Runtime build tree larger.
+      - name: Reclaim disk
+        run: |
+          df -h /
+          for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                   /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                   /usr/share/swift; do
+            sudo rm -rf "$d"
+          done
+          sudo docker image prune --all --force
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
+
+      - name: Build the wheel, timed
+        id: build
+        run: |
+          start=$(date +%s)
+          docker buildx build \
+            --file docker/Dockerfile.ortwheel \
+            --target export \
+            --platform linux/arm64 \
+            --build-arg "ORT_REF=${{ needs.resolve.outputs.ort_ref }}" \
+            --output "type=local,dest=./ortwheel" \
+            --progress plain \
+            .
+          mins=$(( ($(date +%s) - start) / 60 ))
+          {
+            echo "## ONNX Runtime aarch64 wheel"
+            echo ""
+            echo "- ref: \`${{ needs.resolve.outputs.ort_ref }}\`"
+            echo "- cores: $(nproc)"
+            echo "- build time: **${mins} min**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          ls -l ./ortwheel
+
+      - name: Publish the wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          notes="ONNX Runtime ${{ needs.resolve.outputs.ort_ref }} built for
+          linux/aarch64 with the TensorRT execution provider, which the
+          published onnxruntime-gpu aarch64 wheels do not contain.
+          Consumed by docker/Dockerfile; not a wyoming-glados release."
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes "$notes" --latest=false
+          fi
+          gh release upload "$TAG" ./ortwheel/*.whl ./ortwheel/SHA256SUMS.txt --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'

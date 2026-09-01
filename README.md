@@ -32,11 +32,15 @@ per utterance; realtime factor is audio seconds produced per second of compute.
 | CUDA | 140 ms | 436 ms | 15x | 3.1 s |
 | CPU | 85 ms | 147 ms | 35x | 1.7 s |
 
-**arm64 gets no TensorRT.** `onnxruntime-gpu` ships the TensorRT execution
-provider only in its x86_64 wheels - the manylinux aarch64 wheel carries
-`libonnxruntime_providers_cuda.so` and no TensorRT provider at all - so the
-`arm64` slice of the image runs on CUDA. Read the next paragraph before
-assuming that is still a win over CPU on an Arm box.
+**arm64 gets TensorRT too, but not from PyPI.** `onnxruntime-gpu` ships the
+TensorRT provider only in its x86_64 wheels - the manylinux aarch64 wheel
+carries `libonnxruntime_providers_cuda.so` and no TensorRT provider at all,
+in the current release and in nightlies alike. So this project compiles one:
+a workflow builds ONNX Runtime for aarch64 with `--use_tensorrt` once per
+onnxruntime version and publishes the wheel, and the arm64 images install
+that instead. The build never happens during a release, only on a version
+bump. That matters because of the next paragraph - without it, arm64 would
+fall back to CUDA, which is the slowest of the three for this model.
 
 **Plain CUDA is slower than CPU for this model**, which is worth knowing before
 treating it as the fallback. ONNX Runtime reports the reason: *"28 Memcpy nodes

@@ -25,6 +25,39 @@
 # x86 but MUST be confirmed on Jetson hardware before release â€” see the iGPU
 # validation checklist in the PR.
 # ===========================================================================
+# ===========================================================================
+# The same compiled ONNX Runtime the dGPU arm64 image uses. The stock aarch64
+# onnxruntime-gpu wheel this file installs from requirements.txt has no
+# TensorRT provider, which for a Jetson image is the whole point - so it is
+# swapped for the wheel built by
+# .github/workflows/ort-aarch64-wheel.yml.
+#
+# Caveat worth stating: that wheel is built on the SBSA NGC base, and this is
+# the pre-SBSA Tegra image. requirements.txt was already installing SBSA
+# aarch64 wheels here, so this does not introduce the mismatch - but this
+# image has never been validated on Jetson hardware, and that is the first
+# thing to check if it misbehaves there.
+# ===========================================================================
+FROM ubuntu:24.04 AS ortwheel
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+ARG ORT_REF=v1.29.0
+ARG ORT_WHEEL_BASE=https://github.com/Jonah-May-OSS/wyoming-glados/releases/download
+RUN set -eu; \
+    mkdir -p /ortwheel; \
+    cd /ortwheel; \
+    BASE="$ORT_WHEEL_BASE/ort-aarch64-$ORT_REF"; \
+    curl -fsSL -o SHA256SUMS.txt "$BASE/SHA256SUMS.txt" \
+      || { echo "No prebuilt ONNX Runtime wheel for $ORT_REF."; \
+           echo "Run the 'ONNX Runtime aarch64 wheel' workflow first."; \
+           exit 1; }; \
+    WHEEL="$(awk '{ print $2 }' SHA256SUMS.txt | sed 's|^[*./]*||' | head -1)"; \
+    [ -n "$WHEEL" ] || { echo "SHA256SUMS.txt names no wheel"; exit 1; }; \
+    curl -fsSL -o "$WHEEL" "$BASE/$WHEEL"; \
+    sha256sum -c SHA256SUMS.txt; \
+    rm -f SHA256SUMS.txt
+
 FROM nvcr.io/nvidia/tensorrt:26.02-py3-igpu AS builder
 
 WORKDIR /usr/src
@@ -97,10 +130,17 @@ ARG TARGETARCH
 # 'optimise' them away on the strength of a library-load audit.
 
 ARG TRT_ARCH=
+# Empty of nothing here: this image is arm64-only, so the wheel is always
+# fetched. Installed after requirements.txt with --no-deps so the CUDA and
+# cuDNN dependency wheels still come from onnxruntime-gpu and only the
+# onnxruntime package itself is replaced.
+COPY --from=ortwheel /ortwheel /tmp/ortwheel
+
 RUN --mount=type=cache,id=pip-$TARGETARCH,target=/root/.cache/pip,sharing=locked \
     python3 -m venv --copies venv \
     && venv/bin/pip install -U setuptools wheel \
     && venv/bin/pip install -r requirements.txt \
+    && venv/bin/pip install --force-reinstall --no-deps /tmp/ortwheel/*.whl \
     && venv/bin/pip install --no-deps -r requirements-piper.txt \
     && find venv -type d -name __pycache__ -prune -exec rm -rf {} + \
     && rm -f venv/lib/python3.12/site-packages/tensorrt_libs/*_win_* \
@@ -144,42 +184,41 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 COPY --from=builder /usr/src/wyoming-glados /usr/src/wyoming-glados
 
-# onnxruntime-gpu ships the TensorRT execution provider ONLY in its x86_64
-# wheels. The manylinux aarch64 wheel contains libonnxruntime_providers_cuda.so
-# and libonnxruntime_providers_shared.so and no TensorRT provider at all
-# (verified against onnxruntime_gpu-1.29.0-cp312-cp312-manylinux_2_34_aarch64:
-# 354 entries, no libonnxruntime_providers_tensorrt.so; the x86_64 wheel has
-# it). So the arm64 image runs on CUDA, and has done since the first
-# multi-arch release - nothing checked, so nobody knew.
+# onnxruntime dlopens the CUDA, cuDNN and TensorRT shared libraries at runtime.
+# They live inside the venv's site-packages, which the dynamic loader does not
+# search. Registering them with ldconfig is preferred over LD_LIBRARY_PATH:
+# an env var is lost through anything that resets the environment (a login
+# shell, a supervisor, docker exec), and the failure is silent - the provider
+# just fails to load and every request falls back to CPU.
 #
-# Hence the per-architecture branch. Asserting TensorRT everywhere fails the
-# arm64 build outright; asserting nothing is how the CPU-fallback bug shipped
-# in the first place. Each architecture is held to what its wheels actually
-# provide.
+# Registered is not the same as loadable. onnxruntime reports a provider it
+# was compiled with even when the .so behind it cannot resolve its own
+# dependencies, and it then falls back to CPU in silence. That is not
+# hypothetical: the CI job that launches this server the same way ran on CPU
+# because libcublas.so.13 was unresolvable - it started, listened, and
+# passed. ldd is what turns that into a build failure.
+#
+# This asserts TensorRT on BOTH architectures, which it could not do while
+# arm64 was installing the stock aarch64 wheel - that one has no TensorRT
+# provider at all. The ortwheel stage now supplies a compiled one, and its
+# download fails hard if the wheel is missing, so there is no path to an
+# arm64 image without the provider. If this ever fails on arm64, the wheel is
+# the thing to look at, not this check.
 RUN set -eu; \
     SP=/usr/src/wyoming-glados/venv/lib/python3.12/site-packages; \
     { ls -d "$SP"/tensorrt_libs 2>/dev/null || true; \
       ls -d "$SP"/nvidia/*/lib 2>/dev/null || true; } \
          > /etc/ld.so.conf.d/wyoming-glados.conf; \
     ldconfig; \
-    case "$(uname -m)" in \
-      x86_64) \
-        WANT="TensorRT"; \
-        PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_tensorrt.so"; \
-        ldconfig -p | grep -q libnvinfer.so.10 \
-          || { echo "libnvinfer not registered"; exit 1; }; \
-        ;; \
-      *) \
-        WANT="CUDA"; \
-        PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_cuda.so"; \
-        ;; \
-    esac; \
+    ldconfig -p | grep -q libnvinfer.so.10 \
+      || { echo "libnvinfer not registered"; exit 1; }; \
+    PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_tensorrt.so"; \
     [ -f "$PROVIDER" ] \
-      || { echo "$WANT provider library missing at $PROVIDER"; exit 1; }; \
+      || { echo "TensorRT provider library missing at $PROVIDER"; exit 1; }; \
     MISSING="$(ldd "$PROVIDER" | grep 'not found' || true)"; \
     [ -z "$MISSING" ] \
       || { echo "provider has unresolved libraries:"; echo "$MISSING"; exit 1; }; \
-    echo "$WANT provider resolves OK on $(uname -m)"
+    echo "TensorRT provider resolves OK on $(uname -m)"
 
 WORKDIR /
 COPY docker/run.sh ./
