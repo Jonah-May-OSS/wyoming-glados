@@ -97,15 +97,23 @@ class Session(Protocol):
     end returning None, so removing them makes pyright fail both methods with
     "must return value on all code paths". Verified by deleting them: 2 pyright
     errors became 4.
+
+    The return types are Sequence, not list, because that is what
+    onnxruntime.InferenceSession actually declares - `run` returns a Sequence
+    of arrays and `get_providers` a Sequence[str]. Narrowing either to list
+    makes the real session fail to satisfy this protocol, which only shows up
+    where onnxruntime is installed: locally it is absent, so the import is
+    unresolved and pyright never compares the two. Both call sites are
+    Sequence-safe (indexing one result, logging the other).
     """
 
     def run(
         self, output_names: list[str] | None, input_feed: dict[str, Any]
-    ) -> list[Any]:
+    ) -> Sequence[Any]:
         """Execute the model."""
         ...  # pylint: disable=unnecessary-ellipsis
 
-    def get_providers(self) -> list[str]:
+    def get_providers(self) -> Sequence[str]:
         """Return the execution providers actually in use."""
         ...  # pylint: disable=unnecessary-ellipsis
 
