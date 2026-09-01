@@ -150,8 +150,9 @@ services:
     environment:
       - STREAMING=true
       - DEBUG=false
-      # Multi-speaker voices only. Omitting it uses id 0, which is p1 -
-      # the flattest speaker, not the one most people want.
+      # Optional. The GLaDOS voice already defaults to p2, the expressive
+      # Portal 2 speaker; set this only to pick a different one. Ignored by
+      # single-speaker voices.
       - SPEAKER=p2
     restart: unless-stopped
     deploy:
@@ -192,8 +193,9 @@ services:
     environment:
       - STREAMING=true
       - DEBUG=false
-      # Multi-speaker voices only. Omitting it uses id 0, which is p1 -
-      # the flattest speaker, not the one most people want.
+      # Optional. The GLaDOS voice already defaults to p2, the expressive
+      # Portal 2 speaker; set this only to pick a different one. Ignored by
+      # single-speaker voices.
       - SPEAKER=p2
     restart: unless-stopped
 ```
@@ -274,8 +276,21 @@ distinct while still sharing one acoustic model across all 125 minutes.
 | 2 | `p2` | 896 | Portal 2 and co-op: the expressive one |
 | 3 | `dota2` | 405 | Dota 2 announcer lines |
 
-Select one at serve time with `--speaker p2`, or the `SPEAKER` environment
-variable, which the Docker images read.
+**The shipped voice defaults to `p2`**, and it says so itself: the config
+carries a `default_speaker` field, so the default belongs to the voice rather
+than to the server and a future voice with a different speaker layout cannot
+inherit this one's answer. Nothing needs setting to get the Portal 2 GLaDOS.
+
+To pick a different speaker, use `--speaker p1` at serve time or the `SPEAKER`
+environment variable, which the Docker images read.
+
+Without that default the server would fall back to id 0 - whichever speaker
+came first in `metadata.csv`, here `p1` with 210 clips rather than `p2` with
+896. Every evaluation of this voice up to 2026-09-01 unknowingly ran as `p1`,
+and the occasional mangled word that produced read as an undertrained model.
+Two training runs went into chasing it. CI now fails if the published config
+carries no `default_speaker`, or if the server does not report synthesizing
+as `p2`.
 
 Ids are assigned by first appearance in `metadata.csv`, so they are a property
 of the trained voice, not a constant. They are written into the voice config as
