@@ -28,11 +28,25 @@ FROM nvcr.io/nvidia/tensorrt:26.08-py3 AS builder
 RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99network-resilience \
     && apt-get update && apt-get install -y --no-install-recommends \
         git \
-        cmake \
         build-essential \
         python3-dev \
         python3-pip \
+        python3-venv \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# CMake, from pip rather than apt, in its own prefix.
+#
+# ONNX Runtime's CMakeLists.txt requires >= 3.28. The NGC image already has
+# cmake 3.24 at /usr/local/bin, which precedes /usr/bin on PATH, so
+# apt-installing a newer one is silently ignored - the first attempt died in
+# 0.24s with "CMake 3.28 or higher is required. You are running version
+# 3.24.0" while a newer cmake sat unused in /usr/bin.
+#
+# A venv keeps it out of the way entirely instead of overwriting the base
+# image's copy, and build.sh is pointed at it explicitly with --cmake_path.
+RUN python3 -m venv /opt/cmake \
+    && /opt/cmake/bin/pip install --no-cache-dir "cmake>=3.31" \
+    && /opt/cmake/bin/cmake --version
 
 # Pinned by the caller from requirements.txt, so the compiled wheel is always
 # the same onnxruntime version the pin describes. A mismatch would put a
@@ -55,6 +69,7 @@ WORKDIR /src/onnxruntime
 # supports: 87 = Orin, 90 = Hopper/GH200, 100 = Blackwell/GB200, 110 = Thor.
 ARG CUDA_ARCHS=87;90;100;110
 RUN ./build.sh \
+        --cmake_path /opt/cmake/bin/cmake \
         --config Release --update --build --parallel \
         --build_wheel --skip_tests --allow_running_as_root \
         --compile_no_warning_as_error \
