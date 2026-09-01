@@ -253,7 +253,15 @@ class TestDownloadDestinationIsRestricted:
         # indistinguishable from a substring check on a URL, and CodeQL flags
         # it as incomplete URL sanitization. Calling the real function is both
         # the stronger assertion and free of that shape.
-        url = "https://theportalwiki.com/w/images/GLaDOS_line.wav"
+        url = "https://theportalwiki.com/wiki/GLaDOS_voice_lines_(Portal)"
+        assert _check_url(url) == url
+
+    def test_the_host_the_audio_is_actually_served_from_is_allowed(self):
+        # The pages live on theportalwiki.com but every .wav they link to is
+        # on i1.theportalwiki.net. An allowlist holding only the page host
+        # passes every test written about the page host and still refuses the
+        # entire corpus, which is what the first version of it did.
+        url = "https://i1.theportalwiki.net/img/e/e5/GLaDOS_line.wav"
         assert _check_url(url) == url
 
     def test_an_allowed_host_as_a_mere_substring_is_still_refused(self):

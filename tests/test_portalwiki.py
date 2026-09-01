@@ -338,3 +338,30 @@ class TestOnlyQuotedItalicsAreTranscripts:
             '<a href="https://x/alt.wav">Download</a></li></ul>'
         )
         assert parse_page(html, next(iter(PAGES))) == []
+
+    def test_a_closing_quote_separated_from_the_run_still_counts(self):
+        # The closing quote need not arrive in the first text node after
+        # </i>. A tag in between splits the text, and the leading fragment
+        # here is whitespace only - no meaningful character at all. Settling
+        # the run on that empty answer marked a genuine quoted line as
+        # unquoted and dropped it, so the run has to stay pending until some
+        # node actually says something. No line on the four live pages is
+        # written this way today - output over all of them is byte-identical
+        # either way - so this guards against wiki formatting drift rather
+        # than recovering anything currently lost.
+        html = (
+            '<ul><li>"<i>Shall not be mourned.</i> <b>"</b> '
+            '<a href="https://x/mourn.wav">Download</a></li></ul>'
+        )
+        lines = parse_page(html, next(iter(PAGES)))
+        assert [line.transcript for line in lines] == ["Shall not be mourned."]
+
+    def test_a_deferred_close_cannot_rescue_an_unquoted_aside(self):
+        # Staying pending must not let a quote from further along the <li>
+        # close a run that never opened with one. The opening delimiter is
+        # checked too, so this still yields nothing.
+        html = (
+            "<ul><li><i>Upon destroying the last core, this will sound:</i> "
+            '<a href="https://x/scream.wav">"*scream*"</a></li></ul>'
+        )
+        assert parse_page(html, next(iter(PAGES))) == []

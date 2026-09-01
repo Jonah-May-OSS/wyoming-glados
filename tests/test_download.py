@@ -15,6 +15,26 @@ from download import (
 )
 
 
+class _Response(io.BytesIO):
+    """A urlopen stand-in that answers Content-Length like a real server.
+
+    A bare BytesIO has no `.headers`, so remote_size() and the phase-1
+    short-transfer check both fall through their except branches and assert
+    nothing. Carrying the header is what lets a test drive re-download and
+    commit down the paths production takes.
+    """
+
+    def __init__(self, data: bytes):
+        super().__init__(data)
+        self.headers = {"Content-Length": str(len(data))}
+
+    def __enter__(self) -> "_Response":
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+
 # -----------------------------
 # _quote_url
 # -----------------------------
@@ -70,23 +90,69 @@ def test_is_valid_file_bad_md5(tmp_path, caplog):
 # ================================================================
 def test_ensure_model_exists_downloads_missing_files(tmp_path):
     base_url = "https://example.com/{file}"
+    payload = b"x" * 4096
+
+    # shutil.copyfileobj is deliberately NOT patched. Stubbing it out left
+    # every .part file empty, so the size check rejected all of them, every
+    # download was recorded as a failure and the commit phase never ran - and
+    # the test still passed, because it asserted only that urlopen and
+    # copyfileobj had been called. Letting the real copy run is what makes
+    # the happy path reachable, and the return value plus the files on disk
+    # are what say it actually happened.
+    with patch("download.urlopen") as urlopen_mock:
+        urlopen_mock.side_effect = lambda *_a, **_kw: _Response(payload)
+        assert ensure_model_exists(tmp_path, base_url) is True
+
+    assert urlopen_mock.call_count == 2
+    for name in ("glados.onnx", "glados.onnx.json"):
+        assert (tmp_path / name).read_bytes() == payload
+    # No sidecars or rollback copies survive a clean commit.
+    assert not list(tmp_path.glob("*.part"))
+    assert not list(tmp_path.glob("*.prev"))
+
+
+def test_ensure_model_exists_keeps_the_old_voice_when_a_commit_fails(tmp_path):
+    """A failure part-way through the commit must not leave a mixed set.
+
+    The voice is two files that describe each other: the .onnx.json carries
+    the speaker_id_map and phoneme_id_map for the graph in the .onnx. Nothing
+    downstream cross-checks them - __main__ only tests that both paths exist -
+    so a new model committed beside an old config loads and then mis-speaks
+    rather than failing.
+    """
+    base_url = "https://example.com/{file}"
+    old_payload = b"old" * 1024
+    new_payload = b"new" * 2048
+
+    for name in ("glados.onnx", "glados.onnx.json"):
+        (tmp_path / name).write_bytes(old_payload)
+
+    real_replace = download.Path.replace
+
+    def failing_replace(self, target):
+        # Keyed on which rename it is, not on a call index: the number of
+        # renames is an implementation detail, and a count would stop
+        # describing "the second file's commit" the moment that changes.
+        # This is the moment a half-applied set becomes possible - the first
+        # file is committed, the second is not.
+        if self.suffix == ".part" and target.name.endswith(".onnx.json"):
+            raise OSError("disk full")
+        return real_replace(self, target)
 
     with (
         patch("download.urlopen") as urlopen_mock,
-        patch("shutil.copyfileobj") as copy_mock,
-        patch("download.get_file_hash") as hash_mock,
+        patch.object(download.Path, "replace", failing_replace),
     ):
-        hash_mock.return_value = "ffffffffffffffffffffffffffffffff"
+        # A different length is what makes _classify re-download: the voice
+        # files carry no checksum on a custom URL, so the remote
+        # Content-Length is the only signal that what is on disk is stale.
+        urlopen_mock.side_effect = lambda *_a, **_kw: _Response(new_payload)
+        assert ensure_model_exists(tmp_path, base_url) is False
 
-        urlopen_mock.return_value = MagicMock(
-            __enter__=lambda _s: io.BytesIO(b"x" * 4096),
-            __exit__=lambda *_exc: False,
-        )
-
-        ensure_model_exists(tmp_path, base_url)
-
-        assert urlopen_mock.call_count == 2
-        assert copy_mock.call_count == 2
+    for name in ("glados.onnx", "glados.onnx.json"):
+        assert (tmp_path / name).read_bytes() == old_payload
+    assert not list(tmp_path.glob("*.part"))
+    assert not list(tmp_path.glob("*.prev"))
 
 
 # ================================================================

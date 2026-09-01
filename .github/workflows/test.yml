@@ -81,7 +81,7 @@ jobs:
       # RUNNER_TOOL_CACHE points at the persistent NFS cache, so 3.13 is
       # downloaded once and restored instantly after.
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
 
@@ -200,6 +200,32 @@ jobs:
             exit 1
           fi
           echo "TensorRT provider active OK"
+
+      # The other half of the same lesson. TensorRT falling back to CPU was
+      # invisible because nothing asserted it; the speaker default was
+      # invisible for the same reason. Every evaluation of this voice up to
+      # 2026-09-01 ran as p1 - id 0, 210 clips - instead of p2, and the
+      # mangled words that produced were read as an undertrained model.
+      #
+      # export_glados.sh stamps default_speaker into the shipped .onnx.json,
+      # so this asserts on the log line the runner prints at load: it proves
+      # the published voice config actually carries the default, which a
+      # check on the repo alone cannot.
+      - name: The server must resolve the voice's intended speaker
+        if: always()
+        run: |
+          echo "--- speaker selected at load ---"
+          grep -a "Multi-speaker voice" server.log || true
+          if grep -aq "declares no default_speaker" server.log; then
+            echo "FAIL: the published voice config has no default_speaker;"
+            echo "the server fell back to id 0."
+            exit 1
+          fi
+          if ! grep -aq "synthesizing as p2" server.log; then
+            echo "FAIL: expected the voice to synthesize as p2."
+            exit 1
+          fi
+          echo "Default speaker p2 OK"
 
       - name: Upload Server Logs
         if: always()

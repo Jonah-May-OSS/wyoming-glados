@@ -60,6 +60,15 @@ DEFAULT_MODEL_DIR = "./models"
 # the checksum settles the rest.
 MIN_PLAUSIBLE_FILE_BYTES = 1024
 
+# Ceiling on how long a single request may stall. urlopen defaults to no
+# timeout at all, so a server that accepts the connection and then sends
+# nothing blocks forever. This runs at container start, before the Wyoming
+# server binds its port, so a hung fetch is not a slow download - it is a
+# service that never comes up and never says why. Generous enough for the
+# ~60 MB voice on a slow link, since it bounds inactivity per socket
+# operation rather than the whole transfer.
+REQUEST_TIMEOUT_SECONDS = 60
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -92,7 +101,7 @@ def remote_size(url: str, opener: Callable[..., Any] | None = None) -> int | Non
         # tests make real network calls while asserting they made none.
         open_url = urlopen if opener is None else opener
         request = Request(_quote_url(url), method="HEAD")
-        with open_url(request) as response:
+        with open_url(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             length = response.headers.get("Content-Length")
         return int(length) if length is not None else None
     except Exception:
@@ -194,6 +203,51 @@ def _voice_checksums(voice_name: str, base_url: str) -> dict[str, str]:
     return dict(VOICE_CHECKSUMS)
 
 
+def _commit_fetched(fetched: list[tuple[ModelFile, Path, Path]]) -> bool:
+    """Move verified sidecars into place as a set, or leave nothing changed.
+
+    Each replace() is atomic on its own, but the voice is two files that have
+    to agree: .onnx.json carries the speaker_id_map and phoneme_id_map for the
+    graph in .onnx. A crash, a full disk or a permission error between the two
+    renames leaves a new model beside an old config. Nothing downstream
+    detects that - __main__ checks only that both paths exist - so the runner
+    loads a graph whose speaker ids the config does not describe and mis-speaks
+    instead of failing.
+
+    So each file is moved aside rather than overwritten, and a failure part-way
+    through puts back the ones already done. The result is all-new or all-old;
+    a half-applied set is never visible.
+    """
+    committed: list[tuple[Path, Path | None]] = []
+    try:
+        for _model, model_file_path, part_path in fetched:
+            backup: Path | None = None
+            if model_file_path.exists():
+                backup = model_file_path.with_name(model_file_path.name + ".prev")
+                model_file_path.replace(backup)
+            # Recorded before the commit, not after: if this replace() is the
+            # one that fails, the backup has already been made and rollback
+            # still has to put it back. Appending afterwards orphaned it at
+            # <name>.prev and left the real path missing entirely.
+            committed.append((model_file_path, backup))
+            part_path.replace(model_file_path)
+            _LOGGER.info("Downloaded and verified %s", model_file_path)
+    except Exception:
+        _LOGGER.exception("Failed to commit the voice files; rolling back")
+        for model_file_path, backup in reversed(committed):
+            model_file_path.unlink(missing_ok=True)
+            if backup is not None:
+                backup.replace(model_file_path)
+        for _model, _model_file_path, part_path in fetched:
+            part_path.unlink(missing_ok=True)
+        return False
+
+    for _model_file_path, backup in committed:
+        if backup is not None:
+            backup.unlink(missing_ok=True)
+    return True
+
+
 def ensure_model_exists(
     download_dir: Path, base_url: str, voice_name: str = "glados"
 ) -> bool:
@@ -273,7 +327,9 @@ def ensure_model_exists(
         try:
             _LOGGER.info("Downloading %s to %s", model_url, model_file_path)
             with (
-                urlopen(_quote_url(model_url)) as response,
+                urlopen(
+                    _quote_url(model_url), timeout=REQUEST_TIMEOUT_SECONDS
+                ) as response,
                 open(part_path, "wb") as out_file,
             ):
                 headers = getattr(response, "headers", None)
@@ -337,10 +393,8 @@ def ensure_model_exists(
                 model_file_path.unlink()
         return False
 
-    # Every sidecar here was verified in phase 1, so this loop only commits.
-    for _model, model_file_path, part_path in fetched:
-        part_path.replace(model_file_path)
-        _LOGGER.info("Downloaded and verified %s", model_file_path)
+    if not _commit_fetched(fetched):
+        return False
 
     return all_present
 

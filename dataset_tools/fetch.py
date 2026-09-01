@@ -58,11 +58,19 @@ class FetchReport:
 # 127.0.0.1, at a cloud metadata endpoint, or at any host reachable from
 # whoever runs the crawl. Restricting the destination is what stops an edit
 # from turning this into a request forgery.
+#
+# The media hosts are not the wiki host. Every .wav on the four GLaDOS pages
+# is served from i1.theportalwiki.net (i2 appears alongside it for other
+# assets), while only the pages themselves come from theportalwiki.com. The
+# first version of this list held theportalwiki.com plus two hosts that appear
+# nowhere in the corpus, so it would have refused all 1001 audio URLs on the
+# Portal 2 page alone - the allowlist was written from what the crawler seemed
+# like it should fetch rather than from what the pages actually link to.
 ALLOWED_HOSTS = frozenset(
     {
         "theportalwiki.com",
-        "wiki.portal2.com",
-        "steamcdn-a.akamaihd.net",
+        "i1.theportalwiki.net",
+        "i2.theportalwiki.net",
     }
 )
 

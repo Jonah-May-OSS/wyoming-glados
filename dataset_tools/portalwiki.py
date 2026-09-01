@@ -277,12 +277,24 @@ class _VoiceLineParser(HTMLParser):
             frame = self._frames[-1]
             if frame.awaiting_close >= 0:
                 closed_by = _delimiter_after(data)
-                text, _ = frame.runs[frame.awaiting_close]
-                quoted = (
-                    frame.opened_after in _QUOTE_CHARS and closed_by in _QUOTE_CHARS
-                )
-                frame.runs[frame.awaiting_close] = (text, quoted)
-                frame.awaiting_close = -1
+                # An empty result means this text node carried no meaningful
+                # character - whitespace, or nothing but inner quotes - so it
+                # says nothing about whether the run was closed. Resolving on
+                # it would settle the run as unquoted and stop looking, losing
+                # a real line whose closing quote is in the next node -
+                # a closing tag with a newline or a space before the quote
+                # rather than the quote sitting flush against it. Stay
+                # pending instead and let a later node decide. A run
+                # still pending at
+                # </li> keeps the False it was appended with, so the
+                # unquoted-aside case is unchanged.
+                if closed_by:
+                    text, _ = frame.runs[frame.awaiting_close]
+                    quoted = (
+                        frame.opened_after in _QUOTE_CHARS and closed_by in _QUOTE_CHARS
+                    )
+                    frame.runs[frame.awaiting_close] = (text, quoted)
+                    frame.awaiting_close = -1
             frame.outside.append(data)
 
     def _emit(self, frame: _Frame) -> None:
