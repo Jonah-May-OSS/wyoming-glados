@@ -10,7 +10,7 @@ onnx~=1.20
 
 # Used by server/sentence_boundary.py for the streaming sentence splitter,
 # which needs the `regex` module's Unicode property escapes rather than `re`.
-regex~=2026.8.31
+regex~=2026.9.3
 
 # ONNX Runtime with the CUDA and TensorRT execution providers. The TensorRT
 # major version is not free to choose: onnxruntime-gpu links libnvinfer.so.10,
