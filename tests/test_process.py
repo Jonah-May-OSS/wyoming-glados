@@ -34,6 +34,9 @@ class TestGladosProcessLogic:
     async def test_tts_processing_flow(self):
         """Test normal TTS flow."""
         mock_runner = MagicMock()
+        # The rate now comes from the runner, which reads it from the voice
+        # config; a bare MagicMock would hand AudioStart a Mock object.
+        mock_runner.sample_rate = 22050
 
         run_tts_stream_mock = MagicMock(return_value=iter([b"audio_data"]))
         mock_runner.run_tts_stream = run_tts_stream_mock
@@ -53,6 +56,17 @@ class TestGladosProcessLogic:
         assert run_tts_stream_mock.call_count == 1
         assert run_tts_stream_mock.call_args is not None
         assert run_tts_stream_mock.call_args.args == ("Test text", 1.0)
+
+    @pytest.mark.asyncio
+    async def test_rate_follows_the_voice_not_the_module_constant(self):
+        """A 16 kHz voice must not be announced as 22050 and played too fast."""
+        mock_runner = MagicMock()
+        mock_runner.sample_rate = 16000
+        mock_runner.run_tts_stream = MagicMock(return_value=iter([b"audio_data"]))
+
+        chunks = [c async for c in GladosProcess("default", mock_runner).run_tts("hi")]
+
+        assert [c[1] for c in chunks] == [16000]
 
     @pytest.mark.asyncio
     async def test_tts_streams_multiple_chunks(self):

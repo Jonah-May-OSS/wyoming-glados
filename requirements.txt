@@ -1,11 +1,30 @@
 wyoming==1.10.2
-deep_phonemizer~=0.0.19
-Flask~=3.1.3
-inflect~=7.5.0
-numpy~=2.5.1
-pydub~=0.25.1
+numpy~=2.5.2
+
+# Read only at startup, to resolve TensorRT shape profiles: the profile inputs
+# are internal tensors whose dimensions are not exposed by onnxruntime. Without
+# profiles TensorRT recompiles on nearly every request, because the stochastic
+# duration predictor gives the decoder a new length each time - 2939 ms per
+# utterance against 9.9 ms with them.
+onnx~=1.20
+
+# Used by server/sentence_boundary.py for the streaming sentence splitter,
+# which needs the `regex` module's Unicode property escapes rather than `re`.
 regex~=2026.9.3
-torch==2.13.0
-torch-tensorrt==2.13.0
-Unidecode~=1.4.0
-audioop-lts~=0.2.2; python_version>='3.13'
+
+# ONNX Runtime with the CUDA and TensorRT execution providers. The TensorRT
+# major version is not free to choose: onnxruntime-gpu links libnvinfer.so.10,
+# so tensorrt-cu13 must stay on the 10.x line. Installing 11.x leaves the
+# provider unable to load and ONNX Runtime falls back to CUDA silently, which
+# costs roughly 5x throughput with nothing in the logs to explain it.
+# The [cuda,cudnn] extras are NOT optional here. They pull the CUDA runtime,
+# cuDNN, cuFFT and cuRAND wheels that the GPU providers dlopen. Previously the
+# legacy torch dependency happened to drag those in; with torch gone, omitting
+# them leaves onnxruntime listing TensorrtExecutionProvider as "available"
+# while failing to create it, and every request silently runs on CPU.
+onnxruntime-gpu[cuda,cudnn]~=1.29.0
+tensorrt-cu13==10.16.1.11
+
+# A piper-tts dependency. Declared here because piper-tts itself must be
+# installed with --no-deps; see requirements-piper.txt.
+pathvalidate~=3.3

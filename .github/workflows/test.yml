@@ -30,32 +30,54 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
-      - name: Wait for Pylint check
+      # No pylint step: its checks are now ruff's, waited on above. A wait for
+      # a check that no workflow reports does not pass, it hangs until the
+      # action times out, so this list has to be kept in step with the
+      # workflows that actually run.
+      - name: Wait for ty check
         uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          check-name: pylint
+          check-name: ty
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
-      - name: Wait for Pyright check
+      # Gate the GPU job on the unit tests. There is one self-hosted runner and
+      # the image build competes for it, so spending it on a branch whose tests
+      # already fail is the expensive way to find out.
+      - name: Wait for pytest check
         uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          check-name: pyright
+          check-name: pytest
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
   test_linux:
     needs: wait_for_checks
     name: "Build and Test on Linux (self-hosted runner)"
+    # The only job that needs the self-hosted runners, and the reason they
+    # exist: it asserts the TensorRT execution provider actually LOADS, which
+    # takes a real GPU and driver rather than just the wheels. Every other
+    # job belongs on ubuntu-latest, which is free for this repository.
     runs-on: self-hosted
+    # Same-repo pull requests only.
+    #
+    # This job checks out the pull request's code and runs it on hardware we
+    # own - installing its requirements files, then starting its server. A
+    # fork PR could point requirements-piper.txt at any sdist or VCS URL, and
+    # pip executes build code during installation, so opening a PR would be
+    # enough to run arbitrary code on the runner. A read-only GITHUB_TOKEN
+    # does not help with that; the exposure is the machine, not the token.
+    #
+    # A fork PR therefore skips this job and needs a maintainer to run it from
+    # a branch in this repository after reading the diff. ruff.yml already
+    # guards its push step on the same condition.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       # 1. Checkout the repository code
       - name: Checkout Code
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
-        with:
-          submodules: recursive
 
       # gcc/g++, netcat-openbsd and virtualenv are baked into the custom runner
       # image (local/gpu-runner), so no in-job apt/pip installs are needed.
@@ -63,13 +85,13 @@ jobs:
       # RUNNER_TOOL_CACHE points at the persistent NFS cache, so 3.13 is
       # downloaded once and restored instantly after.
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
 
-      # No CUDA toolkit install: every dependency is a prebuilt wheel (torch,
-      # torch-tensorrt, torchvision, scipy, ...) with no source compilation, so
-      # nvcc isn't needed. CUDA runtime comes from the wheels + the self-hosted
+      # No CUDA toolkit install: every dependency is a prebuilt wheel
+      # (onnxruntime-gpu, tensorrt, ...) with no source compilation, so nvcc
+      # isn't needed. CUDA runtime comes from the wheels + the self-hosted
       # runner's nvidia runtime. Installing the toolkit per run wrote ~4GB to
       # local disk and contributed to a cluster etcd incident.
 
@@ -82,7 +104,7 @@ jobs:
           if [ -n "$RUNNER_CACHE" ]; then
             MODELS_DIR="$RUNNER_CACHE/glados/models"
           else
-            MODELS_DIR="$PWD/gladostts/models"
+            MODELS_DIR="$PWD/models"
           fi
           mkdir -p "$MODELS_DIR"
           echo "MODELS_DIR=$MODELS_DIR" >> "$GITHUB_ENV"
@@ -92,8 +114,37 @@ jobs:
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
-          python3 download.py --model-dir "$MODELS_DIR"
           pip install -r requirements.txt
+          # --no-deps: piper-tts requires the CPU-only onnxruntime, which owns
+          # the same module as onnxruntime-gpu and would silently replace it.
+          pip install --no-deps -r requirements-piper.txt
+          python3 download.py --model-dir "$MODELS_DIR"
+
+      # Reproduce what the image does, because this job exists to test how the
+      # image launches and had stopped doing so.
+      #
+      # onnxruntime dlopens the CUDA/cuDNN/TensorRT libraries at runtime. They
+      # live in the venv's site-packages, which the dynamic loader does not
+      # search. docker/Dockerfile registers them with ldconfig and fails the
+      # build if libnvinfer is missing; this job did neither, so the TensorRT
+      # provider failed to load with "libcublas.so.13: cannot open shared
+      # object file", CUDA failed the same way on libcublasLt, and the server
+      # fell all the way back to CPU - starting, listening, and passing this
+      # job in ten seconds while exercising none of the acceleration it is
+      # here to exercise.
+      #
+      # LD_LIBRARY_PATH rather than ldconfig only because writing
+      # /etc/ld.so.conf.d needs root on a shared runner. The assertion below
+      # is what makes the difference safe: if the path is ever lost, the job
+      # fails instead of silently testing a CPU build.
+      - name: Put the CUDA/TensorRT wheel libraries on the loader path
+        run: |
+          source .venv/bin/activate
+          SP="$(python3 -c 'import site; print(site.getsitepackages()[0])')"
+          LIBS="$SP/tensorrt_libs"
+          for d in "$SP"/nvidia/*/lib; do [ -d "$d" ] && LIBS="$LIBS:$d"; done
+          echo "LD_LIBRARY_PATH=$LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH set to $LIBS"
 
       - name: Start GLaDOS TTS Server and Test Listening
         run: |
@@ -136,6 +187,49 @@ jobs:
           kill $SERVER_PID
           wait $SERVER_PID 2>/dev/null || true
           exit 0
+
+      # Listening is not the same as accelerated. onnxruntime falls back
+      # silently - TensorRT to CUDA to CPU - so without this the job's only
+      # real assertion is that a CPU build can open a socket, which is what it
+      # had been quietly asserting.
+      - name: The server must actually be on TensorRT
+        if: always()
+        run: |
+          echo "--- providers reported at load ---"
+          grep -a "providers:" server.log || true
+          if ! grep -aq "providers:.*TensorrtExecutionProvider" server.log; then
+            echo "FAIL: the server did not load the TensorRT provider."
+            echo "--- provider load errors ---"
+            grep -aiE "Failed to load library|EP Error|Falling back" server.log | head -20
+            exit 1
+          fi
+          echo "TensorRT provider active OK"
+
+      # The other half of the same lesson. TensorRT falling back to CPU was
+      # invisible because nothing asserted it; the speaker default was
+      # invisible for the same reason. Every evaluation of this voice up to
+      # 2026-09-01 ran as p1 - id 0, 210 clips - instead of p2, and the
+      # mangled words that produced were read as an undertrained model.
+      #
+      # export_glados.sh stamps default_speaker into the shipped .onnx.json,
+      # so this asserts on the log line the runner prints at load: it proves
+      # the published voice config actually carries the default, which a
+      # check on the repo alone cannot.
+      - name: The server must resolve the voice's intended speaker
+        if: always()
+        run: |
+          echo "--- speaker selected at load ---"
+          grep -a "Multi-speaker voice" server.log || true
+          if grep -aq "declares no default_speaker" server.log; then
+            echo "FAIL: the published voice config has no default_speaker;"
+            echo "the server fell back to id 0."
+            exit 1
+          fi
+          if ! grep -aq "synthesizing as p2" server.log; then
+            echo "FAIL: expected the voice to synthesize as p2."
+            exit 1
+          fi
+          echo "Default speaker p2 OK"
 
       - name: Upload Server Logs
         if: always()

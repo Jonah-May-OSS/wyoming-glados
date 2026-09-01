@@ -1,0 +1,25 @@
+# The build context is the repo root, so everything not needed in the image
+# must be excluded - data/ alone is ~1 GB of training audio and would be
+# uploaded to the daemon on every build.
+data/
+models/
+htmlcov/
+.venv/
+.ruff-ci-repro/
+# Wheel-build leftovers: a stale copy of the source tree.
+build/
+*.egg-info/
+dist/
+.git/
+.github/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.log
+
+# Training and dataset tooling runs on the host, not in the serving image.
+dataset_tools/
+tests/

@@ -35,6 +35,11 @@ class GladosEventHandler(AsyncEventHandler):
         *args: Any,
         **kwargs: Any,
     ) -> None:
+        """Bind one client connection to the shared process manager.
+
+        `wyoming_info` is turned into its event here, once, because Describe
+        is answered on a hot path and rebuilding it per request is wasted work.
+        """
         super().__init__(*args, **kwargs)
 
         self.cli_args = cli_args
@@ -59,6 +64,11 @@ class GladosEventHandler(AsyncEventHandler):
         self._pump_tasks: set[asyncio.Task[None]] = set()
 
     async def handle_event(self, event: Event) -> bool:
+        """Dispatch one Wyoming event.
+
+        Returns False to close the connection, True to keep it open for the
+        next event.
+        """
         if Describe.is_type(event.type):
             await self.write_event(self.wyoming_info_event)
             _LOGGER.debug("Sent info")
@@ -209,9 +219,16 @@ class GladosEventHandler(AsyncEventHandler):
     async def _start_pipeline(self) -> None:
         """(Re)start the sentence pipeline for a new text stream."""
         await self._cancel_pipeline()
-        # maxsize=1 bounds prefetch: one sentence draining to the client plus
-        # one synthesizing ahead, so a flood of input text can't pile up
-        # unbounded synthesis tasks.
+        # maxsize=1 bounds prefetch at THREE concurrent syntheses (measured,
+        # see test_prefetch_is_bounded_at_three). _enqueue_sentence starts the
+        # pump task BEFORE its blocking put, and a sentence being drained is
+        # still synthesizing, so the steady state is: one draining, one queued,
+        # one blocked on put - all three running. The extra prefetch hides
+        # synthesis latency behind playback.
+        #
+        # The bound depends on _enqueue_sentence being AWAITED sequentially per
+        # sentence, which is what backpressures the caller. Firing enqueues
+        # concurrently would make synthesis unbounded, since only the put waits.
         self._sentence_queue = asyncio.Queue(maxsize=1)
         self._drain_task = asyncio.create_task(self._drain_audio())
 
@@ -300,7 +317,7 @@ class GladosEventHandler(AsyncEventHandler):
                 await task
             except asyncio.CancelledError:
                 pass
-            except Exception as err:  # pylint: disable=broad-except
+            except Exception as err:
                 _LOGGER.debug("Ignoring pump task error during cancel", exc_info=err)
         self._pump_tasks.clear()
         self._sentence_queue = None

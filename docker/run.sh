@@ -6,9 +6,16 @@ cd /usr/src/wyoming-glados || { echo "Unable to cd into /usr/src/wyoming-glados"
 
 STREAMING=${STREAMING:-true}
 DEBUG=${DEBUG:-false}
-# download.py places models in gladostts/models; default MODEL_DIR must match
-# (the old /usr/src/models default pointed at an empty dir on a fresh build).
-MODEL_DIR=${MODEL_DIR:-"/usr/src/wyoming-glados/gladostts/models"}
+# The compose files mount a host directory here. Keeping the voice on a volume
+# lets the TensorRT engine cache persist across restarts, which is the
+# difference between a ~75s cold start and a ~1s warm one.
+# MODELS_DIR is what __main__.py documents and what test.yml sets, so honour
+# it first; MODEL_DIR stays supported for existing compose files. Passing
+# --models-dir below overrides argparse's env-derived default, so a user who
+# set only MODELS_DIR would otherwise have it silently ignored and write the
+# voice and the TensorRT engine cache to the unmounted default path - paying a
+# full cold engine build on every restart with nothing explaining why.
+MODEL_DIR=${MODELS_DIR:-${MODEL_DIR:-"/usr/src/models"}}
 
 # Initialize empty flags
 STREAMING_FLAG=""

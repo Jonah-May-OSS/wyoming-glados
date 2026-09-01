@@ -2,8 +2,10 @@ version: "3"
 services:
   wyoming-glados:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # The Dockerfile COPYs the repo (source, requirements, run.sh),
+      # so the context is the repo root, not docker/.
+      context: ..
+      dockerfile: docker/Dockerfile
     image: wyoming-glados
     container_name: wyoming-glados
     ports:

@@ -32,6 +32,12 @@ class SentenceBoundaryDetector:
     """Detect sentence or long-clause boundaries in streamed text."""
 
     def __init__(self, min_clause_words: int = MIN_CLAUSE_WORDS) -> None:
+        """Start a detector holding no partial text.
+
+        `min_clause_words` is the shortest run of words that may be emitted as
+        a clause, which stops a comma-heavy sentence from being split into
+        fragments too short to synthesize naturally.
+        """
         self.remaining_text = ""
         self.min_clause_words = min_clause_words
 
@@ -102,7 +108,9 @@ class SentenceBoundaryDetector:
 
     @staticmethod
     def _is_decimal(candidate: str, trailing: str) -> bool:
-        """A digit before the period means a decimal, or that we cannot tell yet.
+        """Report whether a digit before the period marks a decimal.
+
+        A digit before the period means a decimal, or that we cannot tell yet.
 
         While streaming, the fractional digits may not have arrived; treat a
         trailing "3." as a decimal so the segment stays buffered until the next
@@ -116,7 +124,9 @@ class SentenceBoundaryDetector:
 
     @staticmethod
     def _is_pause_ellipsis(boundary: str, trailing: str) -> bool:
-        """An ellipsis is a dramatic pause unless a new sentence clearly follows.
+        """Report whether an ellipsis ends the sentence.
+
+        An ellipsis is a dramatic pause unless a new sentence clearly follows.
 
         GLaDOS leans on "..." mid-sentence ("something more... educational.").
         Splitting there hands the vocoder the tail as its own stub utterance,
@@ -135,7 +145,7 @@ class SentenceBoundaryDetector:
 
 
 def remove_asterisks(text: str) -> str:
-    """Remove *asterisks* surrounding **words**"""
+    """Remove *asterisks* surrounding **words**."""
     text = WORD_ASTERISKS.sub(r"\1", text)
     text = LINE_ASTERISKS.sub("", text)
     return text

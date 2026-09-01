@@ -1,19 +1,28 @@
 # syntax=docker/dockerfile:1
 
 # ===========================================================================
-# Builder: full NGC TensorRT image. Clones the source, builds the venv
-# (torch + torch-tensorrt + deps) and downloads the TTS models. The CUDA devel
-# toolkit (~3.8 GB) and build toolchain here are build-only and are NOT carried
-# into the runtime image — the venv is self-contained (torch bundles its CUDA/
-# cuDNN wheels, tensorrt/torch-tensorrt are wheels).
+# Builder: plain Ubuntu, matching the runtime stage exactly.
+#
+# This used to be the NGC TensorRT image (tens of GB), which the old
+# ForwardTacotron backend needed because torch-tensorrt compiled against the
+# CUDA toolkit. Nothing does that any more: onnxruntime-gpu and piper-tts ship
+# manylinux wheels, and tensorrt-cu13 is a small sdist shim that downloads
+# NVIDIA's prebuilt libraries at install time. No nvcc, no CUDA headers, no
+# compiler.
+#
+# Using the same base as the runtime stage also removes the risk the venv
+# relocation used to carry: a --copies venv loads its stdlib from base_prefix,
+# so builder and runtime had to agree on glibc and the python minor version.
+# They are now the same image, so they agree by construction.
 # ===========================================================================
-FROM nvcr.io/nvidia/tensorrt:26.08-py3 AS builder
+FROM ubuntu:24.04 AS builder
 
 WORKDIR /usr/src
 
-# NOTE: clones the ORG repo (was JonahMMay, a stale personal fork). `--copies`
-# makes the venv relocatable onto the slim runtime below. download.py places
-# models in gladostts/models (its default), which the runtime reads.
+# NOTE: `--copies`
+# makes the venv relocatable onto the slim runtime below. The voice itself is
+# NOT baked in: download.py fetches it into --models-dir at startup, so a
+# retrained voice does not require a new image.
 # Make apt resilient to a stalled mirror connection: without a timeout apt can
 # hang indefinitely on a half-open fetch (observed wedging a multi-hour build);
 # retries + a 30s timeout make it fail fast and recover instead.
@@ -23,21 +32,89 @@ RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https:
         python3 \
         python3-pip \
         python3-venv \
-        git \
-    && git clone --recurse-submodules https://github.com/Jonah-May-OSS/wyoming-glados \
-    && cd wyoming-glados \
-    && python3 -m venv --copies venv \
-    && venv/bin/pip install --no-cache-dir -U setuptools wheel \
-    && venv/bin/python download.py \
-    && venv/bin/pip install --no-cache-dir -r requirements.txt \
-    && find venv -type d -name __pycache__ -prune -exec rm -rf {} + \
-    && rm -rf .git /root/.cache/pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The source is COPIED from the build context, not cloned. Cloning fetched
+# whatever was on `main` at build time, which meant (a) pull-request image
+# checks validated main rather than the change under test, and (b) a release
+# tag could publish an image built from a different commit than the tag. The
+# build context is the repo root, so `context: .` in the workflows.
+COPY . /usr/src/wyoming-glados
+
+# The Linux tensorrt wheel ships ~1.8 GB of Windows cross-compilation builder
+# resources (libnvinfer_builder_resource_win_*). A Linux container cannot
+# target Windows, so they are pure weight - in the image, and in every push and
+# pull. The non-_win_ builder resources ARE required: TensorRT engines are
+# compiled on the deployment device, one resource per GPU architecture.
+WORKDIR /usr/src/wyoming-glados
+#
+# The pip download cache is a BuildKit cache mount, NOT a layer: it is mounted
+# for the duration of the RUN and never committed, so keeping the downloads
+# costs nothing in the image. That is why --no-cache-dir is gone - it was
+# guarding image size against a cache that is not part of the image, at the
+# price of re-downloading ~3 GB of CUDA/TensorRT/cuDNN wheels on every build.
+# For the same reason /root/.cache/pip must NOT be deleted below: that path is
+# the mount, and removing it would empty the cache on every build.
+#
+# The cache id is per-architecture. amd64 and arm64 resolve different wheels
+# for the same requirement, and the multi-arch build runs both concurrently;
+# sharing=locked serialises writers so the two cannot interleave.
+ARG TARGETARCH
+
+# TRT_ARCH optionally strips the TensorRT builder resources for every GPU
+# architecture except one. The wheel ships eight (ptx, sm75, sm80, sm86,
+# sm89, sm90, sm100, sm120) totalling ~1.9 GB, and a given deployment maps
+# exactly one - measured on an RTX 4080, only sm89 (185 MB) is ever loaded.
+# This is the same argument as the _win_ strip above, with one difference:
+# _win_ is dead unconditionally, while these are dead only for a KNOWN GPU.
+# So the default is empty and keeps all of them, because the published image
+# has to build engines on whatever card it lands on.
+#
+#     docker build --build-arg TRT_ARCH=sm89 ...   # ~1.7 GB smaller
+#
+# Pinning also drops the ptx resource, so the image can no longer JIT for an
+# unrecognised architecture: a pinned image runs on that architecture only.
+# That failure is loud (no engine can be built) rather than silent.
+#
+# The arch is validated before anything is deleted. A typo would otherwise
+# match nothing, strip every resource, and yield an image that looks fine
+# until it cannot build an engine on any GPU at all.
+# cuFFT (~257 MB) comes in with the onnxruntime-gpu [cuda] extra, and this
+# graph has no DFT/STFT nodes for it to serve. Verified by stripping it and
+# re-running all four provider configurations (TRT->CUDA->CPU, TRT->CPU,
+# CUDA->CPU, CPU): all still synthesize valid audio.
+#
+# The unused cuDNN engine libraries next to it look like the same kind of
+# free win and are NOT. libcudnn_engines_precompiled, _engines_tensor_ir,
+# _adv, _heuristic, _ops and _engines_runtime_compiled (~715 MB) never appear
+# in /proc/self/maps during a TensorRT-served request, because cuDNN loads
+# them lazily and TensorRT is doing the convolutions. Delete them and the
+# CUDA fallback dies on its first Conv node. Measured, not guessed - do not
+# 'optimise' them away on the strength of a library-load audit.
+
+ARG TRT_ARCH=
+RUN --mount=type=cache,id=pip-$TARGETARCH,target=/root/.cache/pip,sharing=locked \
+    python3 -m venv --copies venv \
+    && venv/bin/pip install -U setuptools wheel \
+    && venv/bin/pip install -r requirements.txt \
+    && venv/bin/pip install --no-deps -r requirements-piper.txt \
+    && find venv -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && rm -f venv/lib/python3.12/site-packages/tensorrt_libs/*_win_* \
+    && if [ -n "$TRT_ARCH" ]; then \
+         TL=venv/lib/python3.12/site-packages/tensorrt_libs; \
+         ls "$TL/libnvinfer_builder_resource_${TRT_ARCH}.so."* >/dev/null 2>&1 \
+           || { echo "TRT_ARCH=${TRT_ARCH} matches no builder resource; have:"; \
+                ls "$TL"/libnvinfer_builder_resource_*.so.*; exit 1; }; \
+         find "$TL" -name 'libnvinfer_builder_resource_*.so.*' \
+              ! -name "libnvinfer_builder_resource_${TRT_ARCH}.so.*" -delete; \
+       fi \
+    && find venv -name 'libcufft*.so*' -delete \
+    && rm -rf .git
 
 # ===========================================================================
 # Runtime: slim Ubuntu (matches the NGC base's Ubuntu 24.04 / glibc /
 # python3.12 so the --copies venv relocates cleanly). Adds only the Python
-# stdlib, ffmpeg (pydub audio), libgomp (torch OpenMP) and ca-certificates
+# stdlib, libgomp (OpenMP) and ca-certificates
 # (TLS trust; plain ubuntu ships no CA bundle). libcuda.so / nvidia-smi are
 # injected by the NVIDIA container runtime. Drops the ~3.8 GB CUDA devel
 # toolkit + build toolchain that the self-contained venv makes redundant.
@@ -48,7 +125,6 @@ RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https:
     && apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3.12 \
-        ffmpeg \
         libgomp1 \
         ca-certificates \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -62,8 +138,35 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 COPY --from=builder /usr/src/wyoming-glados /usr/src/wyoming-glados
 
+# onnxruntime dlopens the CUDA, cuDNN and TensorRT shared libraries at runtime.
+# They live inside the venv's site-packages, which the dynamic loader does not
+# search. Registering them with ldconfig is preferred over LD_LIBRARY_PATH:
+# an env var is lost through anything that resets the environment (a login
+# shell, a supervisor, docker exec), and the failure is silent - the provider
+# just fails to load and every request falls back to CPU.
+# Registered is not the same as loadable. onnxruntime reports a provider it
+# was compiled with even when the .so behind it cannot resolve its own
+# dependencies, and it then falls back to CPU in silence. That is not
+# hypothetical: the CI job that launches this server the same way ran on CPU
+# because libcublas.so.13 was unresolvable - it started, listened, and
+# passed. ldd is what turns that into a build failure.
+RUN set -eu; \
+    SP=/usr/src/wyoming-glados/venv/lib/python3.12/site-packages; \
+    { echo "$SP/tensorrt_libs"; ls -d "$SP"/nvidia/*/lib 2>/dev/null; } \
+         > /etc/ld.so.conf.d/wyoming-glados.conf; \
+    ldconfig; \
+    ldconfig -p | grep -q libnvinfer.so.10 \
+      || { echo "libnvinfer not registered"; exit 1; }; \
+    PROVIDER="$SP/onnxruntime/capi/libonnxruntime_providers_tensorrt.so"; \
+    [ -f "$PROVIDER" ] \
+      || { echo "TensorRT provider library missing at $PROVIDER"; exit 1; }; \
+    MISSING="$(ldd "$PROVIDER" | grep 'not found' || true)"; \
+    [ -z "$MISSING" ] \
+      || { echo "provider has unresolved libraries:"; echo "$MISSING"; exit 1; }; \
+    echo "TensorRT provider resolves OK"
+
 WORKDIR /
-COPY ./run.sh ./
+COPY docker/run.sh ./
 
 EXPOSE 10201
 

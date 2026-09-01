@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+# >=77 for PEP 639: the SPDX `license` string and `license-files` below are
+# rejected by older setuptools, which would only surface for someone with a
+# pinned build environment since isolated builds fetch the latest.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,14 +10,22 @@ name = "wyoming-glados"
 version = "0.1.0"
 description = "Wyoming protocol server for GLaDOS TTS"
 requires-python = ">=3.11"
+# GPL-3.0-or-later, not MIT: piper_runtime imports piper.phonemize_espeak at
+# request time and the published image ships piper-tts, which is
+# GPL-3.0-or-later. See NOTICE.md.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE.md", "NOTICE.md"]
+
+# Explicit, because flat-layout auto-discovery fails on this repo: it sees
+# data/, docker/ and tests/ as top-level packages and refuses to guess. Only
+# the runtime packages ship; dataset_tools is build-time tooling and is
+# excluded from the image by .dockerignore too.
+[tool.setuptools]
+packages = ["server", "piper_runtime"]
 
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-exclude = [
-    "gladostts",  # Exclude submodule from linting
-]
-
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
@@ -25,20 +36,72 @@ select = [
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
     "SIM", # flake8-simplify
+    # The three below replace pylint, which this repo no longer runs. They are
+    # the parts of it ruff reimplements: the pylint refactor/convention checks,
+    # docstring presence, and unused arguments.
+    "PL",  # pylint
+    "D",   # pydocstyle
+    "ARG", # flake8-unused-arguments
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
+    # D203/D211 and D212/D213 are mutually exclusive pairs; ruff warns on every
+    # run until one of each is dropped.
+    "D203",  # incorrect-blank-line-before-class (D211 is the choice)
+    "D213",  # multi-line-summary-second-line (D212 is the choice)
+    # PLC0415 (import-outside-top-level) is not adopted, because one import in
+    # piper_runtime.runner provably cannot satisfy it. piper-tts ships
+    # piper.phonemize_espeak and is installed with --no-deps from
+    # requirements-piper.txt, so it is absent from the lint and test
+    # environments; hoisting that import to module scope makes
+    # `import piper_runtime.runner` raise, taking all 299 tests with it.
+    #
+    # The other two in that file are deliberate for a weaker but real reason:
+    # importing onnxruntime pulls in the CUDA libraries, and keeping it inside
+    # _load is what lets the tests exercise the runner with injected sessions
+    # without loading any of that.
+    #
+    # Adopting a rule that needs a per-site exemption at the one place it
+    # matters buys nothing, so it is declined here once, in the open, rather
+    # than suppressed six times in the source. The genuinely movable cases were
+    # moved instead: all six in tests, and all three in bake_scales.py.
+    "PLC0415",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "__main__.py" = ["E402"]  # Module level imports not at top (needed for warning suppression)
+# Exactly two rules, not a blanket "tests/*" = ["D", "PL"]. Everything else in
+# both families is enforced in tests, and fixing those findings is what the
+# rest of this change did.
+#
+# D101/D102/D103/D107: .pylintrc already exempted tests by name, with
+# no-docstring-rgx = ^(_|test_|Test|mock_|pytest_|setup_|teardown_). A test's
+# name is its description; docstrings on 269 of them would restate the name.
+# The docstring rules about FORM (D205, D209, D401, ...) still apply, so the
+# ones tests do have must be well-formed.
+#
+# PLR2004: a test asserting `rate == 22050` is supposed to show the number.
+# Hoisting it to a constant would leave the test comparing a name to itself and
+# hide the value under review. pylint never flagged these either -
+# magic-value-comparison lives in an optional extension .pylintrc never loaded.
+"tests/*" = ["D101", "D102", "D103", "D107", "PLR2004"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+# Limits carried over verbatim from .pylintrc rather than taking ruff's
+# stricter defaults, so the switch does not quietly re-flag code that was
+# already reviewed and accepted under the documented reasoning there.
+[tool.ruff.lint.pylint]
+max-args = 10          # build_dataset: 3 positional plus 7 defaulted knobs
+max-branches = 15
+max-returns = 10
+max-statements = 70
 
 [tool.ruff.lint.isort]
-# Pin first-party packages explicitly. Otherwise ruff auto-detects them from the
-# source tree, which is empty for the `gladostts` submodule in the Ruff CI job
-# (it checks out without submodules) — causing ruff to mis-sort gladostts as
-# third-party and fight pylint, which checks out submodules and sees it as first-party.
-known-first-party = ["gladostts", "server"]
+# Pin first-party packages explicitly so every linter agrees on import order
+# regardless of what happens to be present in the checkout.
+known-first-party = ["dataset_tools", "piper_runtime", "server"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -60,7 +123,6 @@ addopts = [
 [tool.coverage.run]
 omit = [
     "tests/*",
-    "gladostts/*",
     "docker/*",
     "htmlcov/*",
 ]
@@ -70,46 +132,31 @@ omit = [
     "tests/*",
 ]
 
-[tool.pyright]
-pythonVersion = "3.13"
-venvPath = "."
-venv = ".venv"
-typeCheckingMode = "basic"
+[tool.ty.environment]
+python-version = "3.13"
+python = ".venv"
+
+[tool.ty.src]
 include = [
     "__main__.py",
     "download.py",
     "server",
-    "gladostts",
+    "piper_runtime",
+    "dataset_tools",
 ]
 exclude = [
     "tests",
     "docker",
     "htmlcov",
     ".venv",
-    "**/.git",
-    "**/.hg",
-    "**/.svn",
-    "**/.*",
-    "**/node_modules",
     "**/__pycache__",
-    "**/.mypy_cache",
-    "**/.pytest_cache",
     "**/.ruff_cache",
-    "gladostts/models",
-]
-reportMissingModuleSource = "none"
-reportMissingTypeStubs = "none"
-reportDeprecated = "none"
-reportUnknownVariableType = "none"
-reportUnknownMemberType = "none"
-reportUnknownArgumentType = "none"
-reportUnknownParameterType = "none"
-reportUnknownLambdaType = "none"
-reportUnnecessaryCast = "none"
-strict = [
-    "download.py",
-    "server",
-]
-executionEnvironments = [
-    { root = ".", extraPaths = ["."] },
+    # Training-only helper. It imports piper.train, which lives in the WSL
+    # training venv and is deliberately absent from the runtime requirements,
+    # so checking it in CI only produces import noise.
+    #
+    # bake_scales.py used to be excluded alongside it for importing onnx. That
+    # was never the same case: onnx IS a runtime requirement, and now that its
+    # imports sit at module scope the file checks cleanly, so it is covered.
+    "dataset_tools/export_onnx.py",
 ]

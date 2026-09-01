@@ -1,0 +1,15 @@
+# Install with --no-deps, ALWAYS:
+#     pip install --no-deps -r requirements-piper.txt
+#
+# piper-tts supplies piper.phonemize_espeak, the espeak-ng binding that turns
+# text into phonemes. That is the only part of it this project uses.
+#
+# It declares a dependency on `onnxruntime` - the CPU-only build. Installing
+# that alongside onnxruntime-gpu is not additive: both packages own the
+# `onnxruntime` module, the CPU one wins, and CUDA/TensorRT providers vanish.
+# Nothing errors; throughput just drops by roughly 5x. --no-deps is what keeps
+# the GPU build intact, so it cannot be expressed in requirements.txt (pip has
+# no per-requirement --no-deps) and lives in its own file instead.
+#
+# Its runtime deps are pinned in requirements.txt: pathvalidate.
+piper-tts~=1.7.0

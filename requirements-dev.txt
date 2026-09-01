@@ -3,10 +3,9 @@ pytest~=9.1.1
 pytest-asyncio~=1.4.0
 pytest-cov~=7.1.0
 ruff~=0.16.2
-regex~=2026.9.3
-pyright~=1.1.411
-pylint~=4.0.6
-# Stub-only package so pyright can resolve `import pandas` in the gladostts
-# submodule without installing pandas itself (it pins torch/numpy versions that
-# conflict with requirements.txt).
-pandas-stubs~=3.0.5.260730
+# ty replaces pyright, and ruff's PL/D/ARG rules replace pylint.
+#
+# Pinned to an exact version, not a ~= range, because ty is pre-1.0 and its
+# diagnostics still move between releases. A floating pin would let a routine
+# dependency update turn a green PR red for reasons unrelated to the PR.
+ty==0.0.77

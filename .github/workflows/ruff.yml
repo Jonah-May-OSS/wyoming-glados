@@ -3,7 +3,14 @@ permissions:
   contents: write
   pull-requests: write
 
-on: [pull_request]
+# push to main as well as pull_request: ruff now carries the pylint rules, and
+# the pylint workflow it replaces ran on both. The auto-fix commit steps below
+# are already guarded on a pull_request context, so a push event runs the
+# checks and stops there.
+on:
+  pull_request:
+  push:
+    branches: [ main ]
 
 jobs:
   ruff:

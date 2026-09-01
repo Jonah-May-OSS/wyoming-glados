@@ -1,1 +1,1 @@
-"""Wyoming part of the server"""
+"""Wyoming part of the server."""
