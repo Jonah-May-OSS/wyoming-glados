@@ -79,8 +79,8 @@ def test_ensure_model_exists_downloads_missing_files(tmp_path):
         hash_mock.return_value = "ffffffffffffffffffffffffffffffff"
 
         urlopen_mock.return_value = MagicMock(
-            __enter__=lambda s: io.BytesIO(b"x" * 4096),
-            __exit__=lambda *exc: False,
+            __enter__=lambda _s: io.BytesIO(b"x" * 4096),
+            __exit__=lambda *_exc: False,
         )
 
         ensure_model_exists(tmp_path, base_url)
@@ -110,7 +110,7 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
     head = MagicMock()
     head.headers = {"Content-Length": "2048"}
     head.__enter__ = lambda self: self
-    head.__exit__ = lambda self, *exc: False
+    head.__exit__ = lambda _self, *_exc: False
 
     with (
         patch("download.is_valid_file", return_value=True),
@@ -144,7 +144,7 @@ def test_a_partial_refresh_commits_nothing(tmp_path):
     def fake_urlopen(request_or_url, *_args, **_kwargs):
         response = MagicMock()
         response.__enter__ = lambda self: self
-        response.__exit__ = lambda self, *exc: False
+        response.__exit__ = lambda _self, *_exc: False
         response.headers = {"Content-Length": "4096"}
         if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
             return response
@@ -185,7 +185,7 @@ def test_a_failed_refresh_keeps_the_working_voice(tmp_path):
         if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
             response = MagicMock()
             response.__enter__ = lambda self: self
-            response.__exit__ = lambda self, *exc: False
+            response.__exit__ = lambda _self, *_exc: False
             response.headers = {"Content-Length": "4096"}  # remote changed
             return response
         raise OSError("connection reset")  # the refresh fails
@@ -214,7 +214,7 @@ def test_ensure_model_exists_refetches_when_the_remote_size_changed(tmp_path):
     def fake_urlopen(request_or_url, *_args, **_kwargs):
         response = MagicMock()
         response.__enter__ = lambda self: self
-        response.__exit__ = lambda self, *exc: False
+        response.__exit__ = lambda _self, *_exc: False
         response.headers = {"Content-Length": str(len(body))}
         if getattr(request_or_url, "get_method", lambda: "GET")() == "HEAD":
             return response
@@ -258,8 +258,8 @@ def test_ensure_model_exists_removes_invalid_and_downloads(tmp_path):
         patch("shutil.copyfileobj", side_effect=fake_copy),
     ):
         urlopen_mock.return_value = MagicMock(
-            __enter__=lambda s: io.BytesIO(b"x" * 4096),
-            __exit__=lambda *exc: False,
+            __enter__=lambda _s: io.BytesIO(b"x" * 4096),
+            __exit__=lambda *_exc: False,
         )
 
         ensure_model_exists(tmp_path, base_url)
@@ -275,11 +275,10 @@ def test_ensure_model_exists_removes_invalid_and_downloads(tmp_path):
 def test_ensure_model_exists_download_exception_hits_except(
     tmp_path, monkeypatch, caplog
 ):
-    """
-    DIRECTLY exercises the `except Exception:` block.
-    This covers line 130 and its cleanup behavior.
-    """
+    """Exercise the `except Exception:` block directly.
 
+    Covers the handler and its cleanup behaviour.
+    """
     file_path = tmp_path / "glados.onnx"
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text("partial")
@@ -292,10 +291,10 @@ def test_ensure_model_exists_download_exception_hits_except(
 
     # Force exception inside urlopen → triggers except block
     monkeypatch.setattr(
-        download, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(Exception("boom"))
+        download, "urlopen", lambda *_a, **_kw: (_ for _ in ()).throw(Exception("boom"))
     )
 
-    monkeypatch.setattr(download, "get_file_hash", lambda *a: "ignored")
+    monkeypatch.setattr(download, "get_file_hash", lambda *_a: "ignored")
 
     with caplog.at_level(logging.ERROR):
         ensure_model_exists(tmp_path, download.DEFAULT_URL)
@@ -309,11 +308,7 @@ def test_ensure_model_exists_download_exception_hits_except(
 # ensure_model_exists — MD5 mismatch AFTER download (lines 134–156)
 # ================================================================
 def test_ensure_model_exists_md5_mismatch_after_download(tmp_path, monkeypatch, caplog):
-    """
-    Exercises the post-download MD5 mismatch error branch.
-    This covers lines 134–156.
-    """
-
+    """Exercise the post-download MD5 mismatch error branch."""
     file_path = tmp_path / "glados.onnx"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -327,14 +322,14 @@ def test_ensure_model_exists_md5_mismatch_after_download(tmp_path, monkeypatch, 
     monkeypatch.setattr(
         download,
         "urlopen",
-        lambda *a, **kw: MagicMock(
-            __enter__=lambda s: io.BytesIO(b"x" * 4096),
-            __exit__=lambda *exc: False,
+        lambda *_a, **_kw: MagicMock(
+            __enter__=lambda _s: io.BytesIO(b"x" * 4096),
+            __exit__=lambda *_exc: False,
         ),
     )
 
     # Force MD5 mismatch after download
-    monkeypatch.setattr(download, "get_file_hash", lambda *a: "WRONGHASH")
+    monkeypatch.setattr(download, "get_file_hash", lambda *_a: "WRONGHASH")
 
     monkeypatch.setattr(
         download.shutil, "copyfileobj", lambda src, dst: dst.write(src.read())
@@ -359,7 +354,7 @@ def test_returns_false_when_a_download_fails(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(download, "is_valid_file", lambda *_a: False)
     monkeypatch.setattr(
-        download, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("no net"))
+        download, "urlopen", lambda *_a, **_kw: (_ for _ in ()).throw(OSError("no net"))
     )
     assert ensure_model_exists(tmp_path, download.DEFAULT_URL) is False
 
@@ -382,7 +377,7 @@ def test_download_is_atomic_via_a_sidecar(tmp_path, monkeypatch):
     seen = []
 
     class Observing(io.RawIOBase):
-        def readinto(self, buffer):
+        def readinto(self, _buffer):
             seen.append(
                 {
                     "finals": sorted(
@@ -397,7 +392,7 @@ def test_download_is_atomic_via_a_sidecar(tmp_path, monkeypatch):
 
     monkeypatch.setattr(download, "is_valid_file", lambda *_a: False)
     monkeypatch.setattr(
-        download, "urlopen", lambda *a, **kw: contextlib.closing(Observing())
+        download, "urlopen", lambda *_a, **_kw: contextlib.closing(Observing())
     )
 
     ensure_model_exists(tmp_path, download.DEFAULT_URL)

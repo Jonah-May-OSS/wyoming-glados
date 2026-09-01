@@ -58,7 +58,7 @@ _PAGE_SPEAKERS: dict[str, str] = {
 
 
 def is_audio_url(href: str) -> bool:
-    """True for an absolute URL that actually points at a .wav.
+    """Report whether this is an absolute URL that points at a .wav.
 
     The wiki renders missing files as redlinks to Special:Upload, whose query
     string carries the intended filename::
@@ -75,6 +75,9 @@ def is_audio_url(href: str) -> bool:
 
 
 _WS_RE = re.compile(r"\s+")
+
+# <h2> is the section heading; <h3> the subsection beneath it.
+_H2_LEVEL = 2
 # Wiki annotations such as "[sic]" or "[laughs]" describe the audio rather
 # than appearing in it, so they must not reach the phonemizer.
 _ANNOTATION_RE = re.compile(r"\[[^\]]*\]")
@@ -200,7 +203,7 @@ class _VoiceLineParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in ("h2", "h3") and self._heading_level:
             text = _WS_RE.sub(" ", "".join(self._heading_buf)).strip()
-            if self._heading_level == 2:
+            if self._heading_level == _H2_LEVEL:
                 self._h2, self._h3 = text, ""
             else:
                 self._h3 = text

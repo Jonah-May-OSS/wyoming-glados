@@ -1,4 +1,5 @@
-name: Pyright
+---
+name: ty
 permissions:
   contents: read
 
@@ -9,7 +10,7 @@ on:
     branches: [ main ]
 
 jobs:
-  pyright:
+  ty:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -24,13 +25,16 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
-          # requirements-dataset.txt too: pyright's include covers
-          # dataset_tools, which imports scipy. Without it every run fails
-          # on reportMissingImports.
+          # requirements-dataset.txt too: the include below covers
+          # dataset_tools, which imports scipy. Without it every run fails on
+          # unresolved-import.
           .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-dataset.txt
           # --no-deps: piper-tts requires the CPU-only onnxruntime, which owns
-          # the same module as onnxruntime-gpu and would replace it.
+          # the same module as onnxruntime-gpu and would replace it. It is
+          # installed at all because piper_runtime.runner imports
+          # piper.phonemize_espeak; without it that import is unresolvable and
+          # ty fails on a module that is genuinely present at runtime.
           .venv/bin/python -m pip install --no-deps -r requirements-piper.txt
 
-      - name: Run pyright
-        run: .venv/bin/pyright
+      - name: Run ty
+        run: .venv/bin/ty check

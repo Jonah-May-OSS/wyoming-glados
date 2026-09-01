@@ -55,6 +55,11 @@ DEFAULT_URL = (
 )
 DEFAULT_MODEL_DIR = "./models"
 
+# Below this a "download" is an error page or a truncated transfer, not a
+# voice. Deliberately crude: it only has to reject obvious garbage, since
+# the checksum settles the rest.
+MIN_PLAUSIBLE_FILE_BYTES = 1024
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -102,7 +107,7 @@ def is_valid_file(file_path: Path, expected_md5: str | None) -> bool:
     """Check if the file exists, is of sufficient size, and matches the MD5 hash."""
     if not file_path.exists():
         return False
-    if file_path.stat().st_size < 1024:
+    if file_path.stat().st_size < MIN_PLAUSIBLE_FILE_BYTES:
         _LOGGER.warning("File %s is too small.", file_path)
         return False
 
@@ -170,7 +175,7 @@ def _classify(model: ModelFile, path: Path, url: str) -> tuple[bool, bool]:
 
 
 def _voice_checksums(voice_name: str, base_url: str) -> dict[str, str]:
-    """The published checksums, but only where they actually apply.
+    """Return the published checksums, but only where they actually apply.
 
     VOICE_CHECKSUMS describes the assets on VOICE_RELEASE for the default
     voice. Applied to anything else they are not a weaker check but a wrong

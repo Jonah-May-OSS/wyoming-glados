@@ -22,7 +22,15 @@ from __future__ import annotations
 
 import sys
 
+import numpy as np
+import onnx
+from onnx import numpy_helper
+
 DEFAULT_SCALES = (0.667, 1.0, 0.8)
+
+# Accepted argv shapes: src+dst alone, or src+dst plus the three scales.
+_ARGV_PATHS_ONLY = 2
+_ARGV_WITH_SCALES = 5
 INPUT_NAME = "scales"
 
 
@@ -32,10 +40,6 @@ def bake(src: str, dst: str, scales: tuple[float, float, float]) -> bool:
     Returns True if a scales input was converted, False if the graph already
     had none - re-running on a baked model is a no-op, not an error.
     """
-    import numpy as np  # pylint: disable=import-outside-toplevel
-    import onnx  # pylint: disable=import-outside-toplevel
-    from onnx import numpy_helper  # pylint: disable=import-outside-toplevel
-
     model = onnx.load(src)
     graph = model.graph
 
@@ -52,12 +56,22 @@ def bake(src: str, dst: str, scales: tuple[float, float, float]) -> bool:
 
 def main(argv: list[str]) -> int:
     """CLI entry point. Returns a process exit status."""
-    if len(argv) not in (2, 5):
+    if len(argv) not in (_ARGV_PATHS_ONLY, _ARGV_WITH_SCALES):
         print(__doc__, file=sys.stderr)
         return 2
     src, dst = argv[0], argv[1]
-    values = tuple(float(a) for a in argv[2:]) if len(argv) == 5 else DEFAULT_SCALES
-    if bake(src, dst, values):  # type: ignore[arg-type]
+    # Unpacked rather than built with a generator: `tuple(... for ...)` is
+    # tuple[float, ...] to a type checker, which does not satisfy bake's
+    # tuple[float, float, float]. The arity is already guaranteed by the
+    # length check above, so naming the three makes the type exact instead of
+    # asserting it with a type: ignore.
+    values: tuple[float, float, float]
+    if len(argv) == _ARGV_WITH_SCALES:
+        noise_scale, length_scale, noise_w = (float(a) for a in argv[2:])
+        values = (noise_scale, length_scale, noise_w)
+    else:
+        values = DEFAULT_SCALES
+    if bake(src, dst, values):
         print(f"  scales {list(values)} baked in as an initializer")
     else:
         print("  no scales input found; graph already baked")

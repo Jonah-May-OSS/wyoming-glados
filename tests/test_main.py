@@ -88,12 +88,12 @@ def _stub_serving(monkeypatch):
     # side_effect, not return_value: return_value builds ONE coroutine and
     # hands the same object to every call, so a second call awaits an already
     # consumed coroutine and the first leaks a "never awaited" warning.
-    proc_mgr.get_process = MagicMock(side_effect=lambda *a, **k: asyncio.sleep(0))
+    proc_mgr.get_process = MagicMock(side_effect=lambda *_a, **_k: asyncio.sleep(0))
     monkeypatch.setattr(
         mainmod, "GladosProcessManager", MagicMock(return_value=proc_mgr)
     )
     server = MagicMock()
-    server.run = MagicMock(side_effect=lambda *a, **k: asyncio.sleep(0))
+    server.run = MagicMock(side_effect=lambda *_a, **_k: asyncio.sleep(0))
     monkeypatch.setattr(mainmod.AsyncServer, "from_uri", MagicMock(return_value=server))
     return server
 
@@ -219,7 +219,6 @@ async def test_main_happy_path(monkeypatch):
 @pytest.mark.asyncio
 async def test_main_server_run_exception(monkeypatch, capsys):
     """Ensure exception inside server.run() triggers error log and sys.exit(1)."""
-
     # Fake CLI args
     monkeypatch.setattr(sys, "argv", ["prog"])
 

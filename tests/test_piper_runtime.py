@@ -1,6 +1,8 @@
 """Tests for the ONNX Runtime Piper backend."""
 
 import logging
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -38,7 +40,7 @@ class FakeSession:
         )
         self.feeds = []
 
-    def run(self, output_names, input_feed):
+    def run(self, _output_names, input_feed):
         self.feeds.append(input_feed)
         return [self.samples]
 
@@ -195,7 +197,7 @@ class TestRunTtsStream:
 
     def test_sentence_with_no_phonemes_is_skipped(self):
         class EmptySentencePhonemizer:
-            def phonemize(self, voice, text):
+            def phonemize(self, _voice, _text):
                 return [[], ["h"]]
 
         session = FakeSession()
@@ -237,9 +239,6 @@ class TestPhonemizeThreadSafety:
     """espeak-ng holds its state in C globals; the pipeline runs three at once."""
 
     def test_phonemize_is_serialised(self):
-        import threading
-        import time
-
         peak = []
         active = 0
         guard = threading.Lock()
@@ -268,7 +267,9 @@ class TestPhonemizeThreadSafety:
 
 
 class TestShapePassthrough:
-    """Bucketing is gone: explicit TensorRT profiles cover the shape range, so
+    """Pad only below the profile floor, never up to a bucket.
+
+    Bucketing is gone: explicit TensorRT profiles cover the shape range, so
     padding every utterance up to one of seven sizes was pure waste.
 
     The one exception is below the profile's lower bound, where padding is what
@@ -605,8 +606,11 @@ class TestSpeakerSelection:
 
 
 class TestShapeProfiles:
-    """Without profiles TensorRT recompiles per shape, and the stochastic
-    duration predictor gives a new decoder length every request."""
+    """Discover the profile inputs TensorRT asks for by name.
+
+    Without profiles TensorRT recompiles per shape, and the stochastic
+    duration predictor gives a new decoder length every request.
+    """
 
     ERROR = (
         "FAIL : User needs to provide all the dynamic shape inputs with "

@@ -10,18 +10,22 @@ onnx = pytest.importorskip(
 
 
 def _model(with_scales: bool):
-    """A minimal graph shaped like piper's export: input, lengths, scales."""
-    from onnx import TensorProto, helper
-
+    """Build a minimal graph shaped like piper's export: input, lengths, scales."""
     inputs = [
-        helper.make_tensor_value_info("input", TensorProto.INT64, [1, None]),
-        helper.make_tensor_value_info("input_lengths", TensorProto.INT64, [1]),
+        onnx.helper.make_tensor_value_info("input", onnx.TensorProto.INT64, [1, None]),
+        onnx.helper.make_tensor_value_info(
+            "input_lengths", onnx.TensorProto.INT64, [1]
+        ),
     ]
     if with_scales:
-        inputs.append(helper.make_tensor_value_info("scales", TensorProto.FLOAT, [3]))
-    node = helper.make_node("Identity", ["input"], ["output"])
-    out = helper.make_tensor_value_info("output", TensorProto.INT64, [1, None])
-    return helper.make_model(helper.make_graph([node], "g", inputs, [out]))
+        inputs.append(
+            onnx.helper.make_tensor_value_info("scales", onnx.TensorProto.FLOAT, [3])
+        )
+    node = onnx.helper.make_node("Identity", ["input"], ["output"])
+    out = onnx.helper.make_tensor_value_info(
+        "output", onnx.TensorProto.INT64, [1, None]
+    )
+    return onnx.helper.make_model(onnx.helper.make_graph([node], "g", inputs, [out]))
 
 
 def _roundtrip(tmp_path, with_scales, scales=DEFAULT_SCALES):
@@ -39,10 +43,8 @@ class TestBake:
         assert [i.name for i in graph.initializer] == ["scales"]
 
     def test_the_baked_values_are_preserved(self, tmp_path):
-        from onnx import numpy_helper
-
         _, graph = _roundtrip(tmp_path, with_scales=True, scales=(0.1, 1.5, 0.2))
-        stored = numpy_helper.to_array(graph.initializer[0])
+        stored = onnx.numpy_helper.to_array(graph.initializer[0])
         assert stored.tolist() == pytest.approx([0.1, 1.5, 0.2])
         assert stored.dtype == "float32"
 
@@ -66,7 +68,5 @@ class TestMain:
         onnx.save(_model(True), str(src))
         assert main([str(src), str(dst)]) == 0
 
-        from onnx import numpy_helper
-
-        stored = numpy_helper.to_array(onnx.load(str(dst)).graph.initializer[0])
+        stored = onnx.numpy_helper.to_array(onnx.load(str(dst)).graph.initializer[0])
         assert stored.tolist() == pytest.approx(list(DEFAULT_SCALES))

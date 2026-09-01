@@ -32,6 +32,10 @@ PEAK_TARGET_DB = -1.0
 _INT16_MAX = 32767.0
 
 
+# Sample width in BYTES, as returned by wave: 2 == 16-bit PCM.
+_PCM16_SAMPLE_WIDTH = 2
+
+
 class AudioError(RuntimeError):
     """A source file could not be decoded."""
 
@@ -63,7 +67,7 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
     except (wave.Error, OSError) as exc:
         raise AudioError(f"{path}: {exc}") from exc
 
-    if width != 2:
+    if width != _PCM16_SAMPLE_WIDTH:
         raise AudioError(f"{path}: expected 16-bit PCM, got {width * 8}-bit")
 
     samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / _INT16_MAX
@@ -140,9 +144,8 @@ def write_wav(path: Path, samples: np.ndarray, rate: int) -> None:
     clipped = np.clip(samples, -1.0, 1.0)
     pcm = np.round(clipped * _INT16_MAX).astype("<i2")
     with wave.open(str(path), "wb") as handle:
-        # pylint: disable=no-member
-        # "wb" makes this a Wave_write; pylint infers Wave_read from the
-        # signature alone and flags every setter below.
+        # "wb" makes this a Wave_write. Type checkers that infer Wave_read
+        # from wave.open's signature alone will flag every setter below.
         handle.setnchannels(1)
         handle.setsampwidth(2)
         handle.setframerate(rate)

@@ -35,6 +35,11 @@ class GladosEventHandler(AsyncEventHandler):
         *args: Any,
         **kwargs: Any,
     ) -> None:
+        """Bind one client connection to the shared process manager.
+
+        `wyoming_info` is turned into its event here, once, because Describe
+        is answered on a hot path and rebuilding it per request is wasted work.
+        """
         super().__init__(*args, **kwargs)
 
         self.cli_args = cli_args
@@ -59,6 +64,11 @@ class GladosEventHandler(AsyncEventHandler):
         self._pump_tasks: set[asyncio.Task[None]] = set()
 
     async def handle_event(self, event: Event) -> bool:
+        """Dispatch one Wyoming event.
+
+        Returns False to close the connection, True to keep it open for the
+        next event.
+        """
         if Describe.is_type(event.type):
             await self.write_event(self.wyoming_info_event)
             _LOGGER.debug("Sent info")
@@ -307,7 +317,7 @@ class GladosEventHandler(AsyncEventHandler):
                 await task
             except asyncio.CancelledError:
                 pass
-            except Exception as err:  # pylint: disable=broad-except
+            except Exception as err:
                 _LOGGER.debug("Ignoring pump task error during cancel", exc_info=err)
         self._pump_tasks.clear()
         self._sentence_queue = None

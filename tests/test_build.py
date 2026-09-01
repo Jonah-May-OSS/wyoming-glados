@@ -16,14 +16,14 @@ RATE = 22050
 
 
 def _speech(seconds: float) -> np.ndarray:
-    """A tone loud enough to survive silence trimming."""
+    """Make a tone loud enough to survive silence trimming."""
     t = np.arange(int(RATE * seconds)) / RATE
     return (0.5 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
 
 
 @pytest.fixture
 def corpus(tmp_path):
-    """A source directory plus a factory for lines pointing into it."""
+    """Build a source directory plus a factory for lines pointing into it."""
     source = tmp_path / "audio"
     source.mkdir()
 
@@ -327,7 +327,7 @@ class TestSoundEffectExclusion:
 
 
 def _lofi(seconds: float) -> np.ndarray:
-    """A mid-band tone: no energy below 300 Hz, so it trips the potato gate."""
+    """Make a mid-band tone with no energy below 300 Hz, tripping the potato gate."""
     t = np.arange(int(RATE * seconds)) / RATE
     return (0.5 * np.sin(2 * np.pi * 2000.0 * t)).astype(np.float32)
 

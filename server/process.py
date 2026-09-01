@@ -30,6 +30,11 @@ class GladosProcess:
     """Info for a running GLaDOS process (one TTS instance)."""
 
     def __init__(self, voice_name: str, runner: Runner) -> None:
+        """Wrap a loaded runner, stamping it as used now.
+
+        `last_used` starts at construction rather than zero so a process is
+        never eligible for idle eviction before it has served anything.
+        """
         self.voice_name = voice_name
         self.runner = runner
         self.last_used = time.monotonic_ns()

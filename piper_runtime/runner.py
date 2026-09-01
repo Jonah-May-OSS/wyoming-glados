@@ -90,13 +90,12 @@ _INT16_MAX = 32767.0
 class Session(Protocol):
     """The slice of an onnxruntime InferenceSession this module uses.
 
-    The `...` bodies below look redundant next to the docstrings, and both
-    pylint (unnecessary-ellipsis) and GitHub code quality ("statement has no
-    effect") report them as dead. They are not. An ellipsis body is what marks
-    a method as a stub; a docstring-only body is a real body that falls off the
-    end returning None, so removing them makes pyright fail both methods with
-    "must return value on all code paths". Verified by deleting them: 2 pyright
-    errors became 4.
+    The `...` bodies below look redundant next to the docstrings, and GitHub
+    code quality reports them as dead ("statement has no effect"). They are
+    not. An ellipsis body is what marks a method as a stub; a docstring-only
+    body is a real body that falls off the end returning None, so removing
+    them makes the type checker fail both methods for not returning a value
+    on all code paths. Verified by deleting them: the error count doubled.
 
     The return types are Sequence, not list, because that is what
     onnxruntime.InferenceSession actually declares - `run` returns a Sequence
@@ -111,11 +110,11 @@ class Session(Protocol):
         self, output_names: list[str] | None, input_feed: dict[str, Any]
     ) -> Sequence[Any]:
         """Execute the model."""
-        ...  # pylint: disable=unnecessary-ellipsis
+        ...
 
     def get_providers(self) -> Sequence[str]:
         """Return the execution providers actually in use."""
-        ...  # pylint: disable=unnecessary-ellipsis
+        ...
 
 
 # TensorRT optimization-profile bounds.
@@ -168,8 +167,10 @@ def missing_profile_inputs(message: str) -> list[str]:
 
 
 def tensor_dims(model_path: Path) -> dict[str, list[Any]]:
-    """Declared dimensions of every tensor, symbolic names included."""
-    import onnx  # pylint: disable=import-outside-toplevel
+    """Return every tensor's declared dimensions, symbolic names included."""
+    # Local: onnx is only needed for TensorRT profile discovery, so a
+    # CPU-only server never pays to import it.
+    import onnx
 
     model = onnx.load(str(model_path), load_external_data=False)
     dims: dict[str, list[Any]] = {}
@@ -312,7 +313,7 @@ def build_scales(
 
 
 def model_fingerprint(model_path: Path, chunk_size: int = 1 << 20) -> str:
-    """A short content hash of the model file."""
+    """Return a short content hash of the model file."""
     digest = hashlib.sha256()
     with open(model_path, "rb") as handle:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
@@ -339,7 +340,7 @@ def engine_cache_dir(models_dir: Path, model_path: Path) -> Path:
 
 
 def session_wants_scales(session: Any) -> bool:
-    """True if the model takes `scales` at runtime rather than baked in.
+    """Report whether the model takes `scales` at runtime rather than baked in.
 
     Voices are normally exported with `scales` as a live input, so this is
     usually True. A voice exported with BAKE_SCALES=1 freezes them into the
@@ -355,7 +356,7 @@ def session_wants_scales(session: Any) -> bool:
 
 
 def session_wants_sid(session: Any) -> bool:
-    """True if the model is multi-speaker and needs a speaker id per request.
+    """Report whether the model needs a speaker id with each request.
 
     Piper's exporter only emits the `sid` input when the checkpoint has more
     than one speaker, so its presence is the reliable signal - the voice config
@@ -676,7 +677,10 @@ class PiperTTSRunner:
 
     def _load(self, *, use_trt: bool) -> None:
         """Create the ONNX Runtime session and load the voice config."""
-        import onnxruntime as ort  # pylint: disable=import-outside-toplevel
+        # Local: importing onnxruntime loads the CUDA libraries with it.
+        # Keeping it here is what lets the tests drive this class with an
+        # injected session and no GPU stack present.
+        import onnxruntime as ort
 
         if not self.model_path.exists():
             raise FileNotFoundError(f"Voice model not found: {self.model_path}")
@@ -716,7 +720,10 @@ class PiperTTSRunner:
         _LOGGER.info("Piper voice loaded, providers: %s", session.get_providers())
 
         if self._phonemizer is None:
-            # pylint: disable=import-outside-toplevel
+            # Local, and it cannot be otherwise: piper-tts is installed
+            # with --no-deps from requirements-piper.txt and is absent
+            # from the lint and test environments, so importing this at
+            # module scope would break every import of this module.
             from piper.phonemize_espeak import EspeakPhonemizer
 
             self._phonemizer = EspeakPhonemizer()

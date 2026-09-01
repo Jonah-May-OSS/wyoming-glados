@@ -228,9 +228,7 @@ class TestMalformedAudio:
         path = tmp_path / "broken.wav"
         write_wav(path, np.zeros(1000, dtype=np.float32), RATE)
 
-        import wave as wave_mod
-
-        real_open = wave_mod.open
+        real_open = wave.open
 
         class Truncated:
             def __init__(self, inner):
@@ -258,8 +256,6 @@ class TestMalformedAudio:
             def getnframes(self):
                 return self._inner.getnframes()
 
-        monkeypatch.setattr(
-            wave_mod, "open", lambda p, m="rb": Truncated(real_open(p, m))
-        )
+        monkeypatch.setattr(wave, "open", lambda p, m="rb": Truncated(real_open(p, m)))
         with pytest.raises(AudioError, match="truncated or malformed"):
             read_wav(path)

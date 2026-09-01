@@ -99,7 +99,7 @@ def safe_filename(url: str) -> str:
 
 
 def is_wav_complete(path: Path) -> bool:
-    """True when `path` holds a plausible, non-empty RIFF/WAVE file.
+    """Report whether `path` holds a plausible, non-empty RIFF/WAVE file.
 
     Guards against resuming onto a truncated file from an interrupted run.
     """

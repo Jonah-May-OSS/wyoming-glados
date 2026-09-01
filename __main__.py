@@ -31,9 +31,15 @@ class NanosecondFormatter(logging.Formatter):
     """Custom formatter to include nanoseconds in log timestamps."""
 
     def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        """Format the record's timestamp, appending nanoseconds.
+
+        `datefmt` is honoured rather than ignored. It used to be accepted and
+        dropped, so a caller passing one got the hardcoded layout back with no
+        indication its argument had gone nowhere.
+        """
         ct = record.created
         t = time.localtime(ct)
-        s = time.strftime("%Y-%m-%d %H:%M:%S", t)
+        s = time.strftime(datefmt or "%Y-%m-%d %H:%M:%S", t)
         return f"{s}.{int(ct * 1e9) % 1_000_000_000:09d}"
 
 
@@ -71,7 +77,7 @@ def _warmup(runner: PiperTTSRunner) -> None:
 
 
 async def main() -> None:
-    """Main entry point for the GLaDOS TTS server."""
+    """Run the GLaDOS TTS server until the process is stopped."""
     parser = argparse.ArgumentParser(description="GLaDOS TTS Server")
     parser.add_argument(
         "--uri",

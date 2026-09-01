@@ -30,19 +30,15 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
-      - name: Wait for Pylint check
+      # No pylint step: its checks are now ruff's, waited on above. A wait for
+      # a check that no workflow reports does not pass, it hangs until the
+      # action times out, so this list has to be kept in step with the
+      # workflows that actually run.
+      - name: Wait for ty check
         uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          check-name: pylint
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-
-      - name: Wait for Pyright check
-        uses: matiasalbarello/wait-on-check-action-ts@8087812521cdb59ebc7751984b31b17209b30eeb # v1.2.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          check-name: pyright
+          check-name: ty
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
