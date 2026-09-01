@@ -35,30 +35,44 @@ concurrency:
 jobs:
   build-check:
     name: Build dGPU image (amd64) + smoke tests
-    runs-on: self-hosted
+    # ubuntu-latest, not self-hosted. The self-hosted runners exist for one
+    # thing - the CUDA/TensorRT assertion in test.yml - and this job needs no
+    # GPU: it builds an image and runs smoke tests that are GPU-free by
+    # design (see the header). Sitting on a self-hosted runner it did nothing
+    # but queue behind, and get cancelled by, the job that does need one.
+    #
+    # The trade is disk. The published amd64 image is ~6.4 GB compressed and
+    # the builder stage carries the full venv on top of that, which is more
+    # than a hosted runner has free out of the box - hence the reclaim step
+    # below. Hosted runners are free for this repository; the GPU box is not.
+    runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@21162887f0d6e25b4e8eafb0cf44cf9bf7f6acd3
-        with:
-          # Route image pulls through the lab's pull-through registry caches.
-          # LAN-only mirrors; buildkit falls back to the upstream registry if
-          # a mirror is unreachable (e.g. on a GitHub-hosted runner).
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["192.168.7.45:5000"]
-            [registry."192.168.7.45:5000"]
-              http = true
-            [registry."ghcr.io"]
-              mirrors = ["192.168.7.45:5001"]
-            [registry."192.168.7.45:5001"]
-              http = true
-            [registry."nvcr.io"]
-              mirrors = ["192.168.7.45:5004"]
-            [registry."192.168.7.45:5004"]
-              http = true
+        # No buildkitd-config-inline here. The lab's pull-through registry
+        # mirrors on 192.168.7.45 are LAN-only, so from a hosted runner every
+        # pull would wait for a connection to a non-routable address before
+        # falling back. publish_container.yaml keeps them; it still runs on
+        # the LAN.
+
+      # Docker's data root is on /, which a hosted runner leaves ~14 GB of -
+      # not enough for the builder stage plus the loaded image. These are the
+      # largest preinstalled toolchains this build never touches; removing
+      # them frees roughly 25 GB. Done inline rather than with a third-party
+      # action so nothing new is trusted with the runner.
+      - name: Reclaim disk for the image build
+        run: |
+          df -h /
+          for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                   /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                   /usr/share/swift; do
+            sudo rm -rf "$d"
+          done
+          sudo docker image prune --all --force
+          df -h /
 
       # The iGPU image is only ever built at publish time, so until now a
       # syntax error in Dockerfile.igpu surfaced as a failed release. --check

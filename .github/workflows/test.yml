@@ -56,6 +56,10 @@ jobs:
   test_linux:
     needs: wait_for_checks
     name: "Build and Test on Linux (self-hosted runner)"
+    # The only job that needs the self-hosted runners, and the reason they
+    # exist: it asserts the TensorRT execution provider actually LOADS, which
+    # takes a real GPU and driver rather than just the wheels. Every other
+    # job belongs on ubuntu-latest, which is free for this repository.
     runs-on: self-hosted
     # Same-repo pull requests only.
     #
