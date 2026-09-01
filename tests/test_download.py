@@ -437,8 +437,9 @@ class TestVoiceChecksums:
         # is the same shape at every epoch, so exports of different
         # checkpoints are byte-identical in LENGTH and the size fallback in
         # _classify() can never see a retrained voice.
-        sums = download._voice_checksums(download.DEFAULT_VOICE_NAME,
-                                         download.DEFAULT_URL)
+        sums = download._voice_checksums(
+            download.DEFAULT_VOICE_NAME, download.DEFAULT_URL
+        )
         assert sums["glados.onnx"] == download.VOICE_CHECKSUMS["glados.onnx"]
         assert sums["glados.onnx.json"]
 
@@ -449,12 +450,16 @@ class TestVoiceChecksums:
         # A mirror or a locally served export is a supported setup; checking it
         # against glados' hashes would fail a good file, and since a mismatch
         # means re-download, that is an unbreakable loop rather than an error.
-        assert download._voice_checksums(
-            download.DEFAULT_VOICE_NAME, "https://example.com/{file}"
-        ) == {}
+        assert (
+            download._voice_checksums(
+                download.DEFAULT_VOICE_NAME, "https://example.com/{file}"
+            )
+            == {}
+        )
 
     def test_returns_a_copy_so_callers_cannot_mutate_the_table(self):
-        sums = download._voice_checksums(download.DEFAULT_VOICE_NAME,
-                                         download.DEFAULT_URL)
+        sums = download._voice_checksums(
+            download.DEFAULT_VOICE_NAME, download.DEFAULT_URL
+        )
         sums["glados.onnx"] = "tampered"
         assert download.VOICE_CHECKSUMS["glados.onnx"] != "tampered"
