@@ -22,10 +22,24 @@ class ModelFile(TypedDict):
     md5: str | None
 
 
-# `latest` rather than a pinned tag so publishing a retrained voice does not
-# also require a code change here. Override with --url to pin a release.
+# The voice lives on its own tag, not on `latest`.
+#
+# `latest` was the obvious choice - a retrained voice reaches deployments with
+# no code change - but it only works if every release carries the voice, and
+# release.yaml cannot. That workflow zips the repo and attaches release.zip;
+# the voice is a 73 MB artifact exported from a training checkpoint that is not
+# in the repo, so CI has nothing to build it from. The first ordinary code
+# release after a voice release would therefore become `latest` with no
+# glados.onnx attached, and every fresh deployment would 404.
+#
+# Pinning decouples the two: code releases cut as often as they like, and
+# shipping a retrained voice is an explicit one-line bump here, reviewable in
+# the PR that ships it. This is what the pre-Piper code did (it pinned
+# glados-tts 1.0.0), arrived at the same way.
+VOICE_RELEASE = "voice-2026.09.01"
 DEFAULT_URL = (
-    "https://github.com/Jonah-May-OSS/wyoming-glados/releases/latest/download/{file}"
+    "https://github.com/Jonah-May-OSS/wyoming-glados/releases/download/"
+    f"{VOICE_RELEASE}/{{file}}"
 )
 DEFAULT_MODEL_DIR = "./models"
 
@@ -108,10 +122,10 @@ def _classify(model: ModelFile, path: Path, url: str) -> tuple[bool, bool]:
       voice.
 
     A checksum settles currency outright. Without one, "exists and over 1024
-    bytes" is not the same as "current": DEFAULT_URL points at
-    releases/latest, so republishing a retrained voice changes what that URL
-    serves while the stale file keeps passing, and every existing deployment
-    stays on the old voice forever - the opposite of what `latest` is for.
+    bytes" is not the same as "current": bumping VOICE_RELEASE changes what
+    DEFAULT_URL serves while the stale file on disk keeps passing that test, so
+    an upgraded deployment would stay on the old voice forever. The same holds
+    for a voice tag republished in place.
 
     Sizes catch that. Weaker than a checksum (a retrained voice that happens to
     match byte-for-byte in length is missed), but it needs no published hash

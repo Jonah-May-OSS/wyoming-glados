@@ -105,8 +105,8 @@ def test_ensure_model_exists_skips_valid_files(tmp_path):
         p.write_bytes(b"0" * 2048)
 
     # A HEAD is expected: the voice files carry md5=None, so "present and over
-    # 1024 bytes" cannot distinguish a current file from a stale one, and the
-    # URL points at releases/latest. The remote size is what settles it.
+    # 1024 bytes" cannot distinguish a current file from a stale one after a
+    # VOICE_RELEASE bump. The remote size is what settles it.
     head = MagicMock()
     head.headers = {"Content-Length": "2048"}
     head.__enter__ = lambda self: self
@@ -203,7 +203,7 @@ def test_a_failed_refresh_keeps_the_working_voice(tmp_path):
 
 
 def test_ensure_model_exists_refetches_when_the_remote_size_changed(tmp_path):
-    """A retrained voice republished to releases/latest must actually arrive."""
+    """A retrained voice at a bumped VOICE_RELEASE must actually arrive."""
     base_url = "https://example.com/{file}"
     model_paths = [tmp_path / "glados.onnx", tmp_path / "glados.onnx.json"]
     for path in model_paths:
@@ -413,3 +413,17 @@ def test_download_is_atomic_via_a_sidecar(tmp_path, monkeypatch):
     assert seen[1]["finals"] == [], "a file was committed before the set was complete"
     assert seen[0]["parts"] == ["glados.onnx.part"]
     assert seen[1]["parts"] == ["glados.onnx.json.part", "glados.onnx.part"]
+
+
+def test_default_url_is_pinned_to_a_voice_tag_not_latest():
+    """The voice must not be fetched from releases/latest.
+
+    release.yaml attaches only release.zip, and cannot build the 73 MB voice
+    because it is exported from a training checkpoint that is not in the repo.
+    Pointing at `latest` therefore means the first ordinary code release after
+    a voice release becomes latest with no glados.onnx attached, and every
+    fresh deployment 404s on the voice.
+    """
+    assert "/releases/latest/" not in download.DEFAULT_URL
+    assert f"/releases/download/{download.VOICE_RELEASE}/" in download.DEFAULT_URL
+    assert download.DEFAULT_URL.format(file="glados.onnx").endswith("/glados.onnx")
