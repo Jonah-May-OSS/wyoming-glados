@@ -36,6 +36,7 @@ RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https:
     && apt-get update && apt-get install -y --no-install-recommends \
         git \
         build-essential \
+        gcc-14 g++-14 \
         python3-dev \
         python3-pip \
         python3-venv \
@@ -83,6 +84,26 @@ RUN set -eu; \
       exit 1; \
     fi; \
     echo "base provides libnvinfer.so.${TRT_SONAME_MAJOR}, matching the pin"
+
+# GCC 14, and a canary that proves it before the four-hour part.
+#
+# CUDA 13's CCCL headers specialize templates with global qualification:
+#
+#   struct ::cuda::proclaims_copyable_arguments<...> : ::cuda::std::true_type
+#
+# GCC rejected that until 14 - "global qualification of class name is
+# invalid before ':' token" - and the base image defaults to GCC 13. It
+# surfaced at 98% of a 213-minute build, in cub/device/device_transform.cuh
+# pulled in by the contrib CUDA kernels.
+#
+# The canary compiles that one header and nothing else. If the host compiler
+# and CCCL disagree it fails in seconds rather than three and a half hours.
+RUN set -eu; \
+    echo '#include <cub/device/device_transform.cuh>' > /tmp/canary.cu; \
+    echo 'int main() { return 0; }' >> /tmp/canary.cu; \
+    nvcc -ccbin /usr/bin/g++-14 -std=c++17 -c /tmp/canary.cu -o /tmp/canary.o; \
+    rm -f /tmp/canary.cu /tmp/canary.o; \
+    echo "CCCL headers compile with $(/usr/bin/g++-14 --version | head -1)"
 
 ARG ORT_REF=v1.29.0
 
@@ -139,7 +160,10 @@ RUN ./build.sh \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
         --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
         --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}" \
-            onnxruntime_BUILD_UNIT_TESTS=OFF
+            onnxruntime_BUILD_UNIT_TESTS=OFF \
+            CMAKE_C_COMPILER=/usr/bin/gcc-14 \
+            CMAKE_CXX_COMPILER=/usr/bin/g++-14 \
+            CMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-14
 
 # Fail here rather than shipping a wheel without the very provider this
 # whole file exists to produce.
