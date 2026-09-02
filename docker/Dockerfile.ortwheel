@@ -20,8 +20,15 @@
 # build needs and the pip wheels do not: nvcc, the CUDA headers, cuDNN and
 # NvInfer.h. It is multi-arch, so on an arm64 builder this resolves to the
 # SBSA aarch64 variant.
+#
+# 26.05 specifically, because it ships TensorRT 10.16.1.11 - the exact
+# version requirements.txt pins tensorrt-cu13 to. The wheel is therefore
+# compiled against the same TensorRT build the image runs it on, not merely
+# a compatible soname. NVIDIA's container release notes map the rest:
+# 26.02 is 10.15.1.26, 26.04 and 26.05 are 10.16.1.11, and 26.06 onwards
+# moved to TensorRT 11 - which is what broke the first wheel.
 # ===========================================================================
-FROM nvcr.io/nvidia/tensorrt:26.02-py3 AS builder
+FROM nvcr.io/nvidia/tensorrt:26.05-py3 AS builder
 
 # Same apt resilience as the image build: without a timeout apt can hang
 # indefinitely on a half-open fetch.
