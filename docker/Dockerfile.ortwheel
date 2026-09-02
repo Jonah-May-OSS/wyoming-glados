@@ -76,10 +76,20 @@ WORKDIR /src/onnxruntime
 # default (nproc x 4) is what ran the machine out. Slower per step, but a
 # build that finishes beats a build that is killed at 50%.
 #
-# CMAKE_CUDA_ARCHITECTURES is deliberately short: every architecture is
-# compiled separately. 87 = Orin, 90 = Hopper/GH200, 100 = Blackwell/GB200,
-# 110 = Thor.
-ARG CUDA_ARCHS=87;90;100;110
+# onnxruntime_BUILD_UNIT_TESTS=OFF is the big one. --skip_tests only skips
+# RUNNING them; the test binaries are still compiled, and they are among the
+# largest targets in the tree. A five-hour run died at 65% having just
+# finished onnxruntime_unittest_utils - hours spent building code this image
+# throws away, and quite possibly the failing target itself.
+#
+# CMAKE_CUDA_ARCHITECTURES: every architecture is compiled separately, so
+# this is a direct multiplier on the longest step. Trimmed from four to the
+# two that describe real arm64 GPU deployments for this project - 87 = Orin,
+# 110 = Thor. Dropped: 90 (Hopper/GH200) and 100 (Blackwell/GB200), which
+# are datacentre parts nobody is running a Home Assistant TTS on. Add them
+# back here if that stops being true; the cost is build time, not
+# correctness.
+ARG CUDA_ARCHS=87;110
 ARG BUILD_PARALLEL=2
 ARG NVCC_THREADS=1
 RUN ./build.sh \
@@ -91,6 +101,7 @@ RUN ./build.sh \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
         --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
         --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}" \
+            onnxruntime_BUILD_UNIT_TESTS=OFF \
             onnxruntime_USE_FLASH_ATTENTION=OFF \
             onnxruntime_USE_MEMORY_EFFICIENT_ATTENTION=OFF \
             onnxruntime_USE_LEAN_ATTENTION=OFF
