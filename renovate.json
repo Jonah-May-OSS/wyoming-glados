@@ -65,6 +65,16 @@
         "pin",
         "digest"
       ]
+    },
+    {
+      "description": "The NGC TensorRT image is what the aarch64 ONNX Runtime wheel is compiled against, so its TensorRT major is coupled to the tensorrt-cu13 pin in requirements.txt. Bumping it alone is a soname break: 26.02 ships TensorRT 10 and 26.08 ships 11, and an automerged bump to 26.08 produced a wheel needing libnvinfer.so.11 in an image shipping libnvinfer.so.10 - caught by the ldd check in docker/Dockerfile, but only after a 232-minute wheel build. A human must move this and tensorrt-cu13 together. docker/Dockerfile.ortwheel now fails in seconds if they disagree, but that is a backstop, not a reason to automerge.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "nvcr.io/nvidia/tensorrt"
+      ],
+      "automerge": false
     }
   ]
 }

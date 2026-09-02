@@ -21,7 +21,7 @@
 # NvInfer.h. It is multi-arch, so on an arm64 builder this resolves to the
 # SBSA aarch64 variant.
 # ===========================================================================
-FROM nvcr.io/nvidia/tensorrt:26.08-py3 AS builder
+FROM nvcr.io/nvidia/tensorrt:26.02-py3 AS builder
 
 # Same apt resilience as the image build: without a timeout apt can hang
 # indefinitely on a half-open fetch.
@@ -51,6 +51,32 @@ RUN python3 -m venv /opt/cmake \
 # Pinned by the caller from requirements.txt, so the compiled wheel is always
 # the same onnxruntime version the pin describes. A mismatch would put a
 # different ONNX Runtime in the image than the requirements file claims.
+# The base image's TensorRT major is not free to choose. The wheel built here
+# links whatever libnvinfer the base provides, and at runtime the image
+# resolves that against the tensorrt-cu13 pin in requirements.txt - which is
+# on the 10.x line. Build on a TensorRT 11 base and the wheel needs
+# libnvinfer.so.11 while the image ships libnvinfer.so.10, so the provider
+# cannot load.
+#
+# That is not hypothetical: renovate bumped this base 26.02 -> 26.08 (PR
+# 631), 26.08 ships TensorRT 11, and the mismatch surfaced as
+#
+#     libnvinfer.so.11 => not found
+#     libnvonnxparser.so.11 => not found
+#
+# in the arm64 image build - after a 232-minute wheel build had already
+# succeeded. This check costs seconds and fails at the top instead.
+ARG TRT_SONAME_MAJOR=10
+RUN set -eu; \
+    if ! ldconfig -p | grep -q "libnvinfer.so.${TRT_SONAME_MAJOR}"; then \
+      echo "This base provides:"; \
+      ldconfig -p | grep -o 'libnvinfer.so.[0-9]*' | sort -u; \
+      echo "but requirements.txt pins tensorrt-cu13 on the ${TRT_SONAME_MAJOR}.x line."; \
+      echo "Move the base image and the tensorrt-cu13 pin together, or not at all."; \
+      exit 1; \
+    fi; \
+    echo "base provides libnvinfer.so.${TRT_SONAME_MAJOR}, matching the pin"
+
 ARG ORT_REF=v1.29.0
 
 RUN git clone --depth 1 --branch "$ORT_REF" --recursive \
@@ -120,6 +146,14 @@ names = zipfile.ZipFile(sys.argv[1]).namelist(); \
 target = 'onnxruntime/capi/libonnxruntime_providers_tensorrt.so'; \
 sys.exit(0) if target in names else sys.exit('built wheel has no ' + target)" \
       "$WHEEL"; \
+    PROV=onnxruntime/capi/libonnxruntime_providers_tensorrt.so; \
+    python3 -c "import sys, zipfile; open('/tmp/prov.so','wb').write( \
+zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))" "$WHEEL" "$PROV"; \
+    readelf -d /tmp/prov.so | grep -o 'libnvinfer.so.[0-9]*' | sort -u; \
+    readelf -d /tmp/prov.so | grep -q "libnvinfer.so.${TRT_SONAME_MAJOR}" \
+      || { echo "built provider does not link libnvinfer.so.${TRT_SONAME_MAJOR}"; \
+           exit 1; }; \
+    rm -f /tmp/prov.so; \
     sha256sum ./*.whl > SHA256SUMS.txt; \
     cat SHA256SUMS.txt
 
