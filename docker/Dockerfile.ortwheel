@@ -63,13 +63,18 @@ WORKDIR /src/onnxruntime
 # --compile_no_warning_as_error: a release branch that warns on a newer
 #   toolchain should not fail the build.
 #
-# The attention kernels are OFF because this builds a runtime for VITS, a
-# small convolutional TTS model that uses none of them. The first attempt was
-# killed with SIGTERM at 50%, and what it was compiling when it died says
-# why: flash_fwd_hdim128_bf16_sm80, moe_gemm_tma_ws_sm90_bf16,
-# fpA_intB_gemm - LLM attention and mixture-of-experts kernels. They are the
-# most memory-hungry things nvcc compiles here and nothing in this project
-# will ever call them.
+# The attention kernels are ON, and must stay on, even though VITS uses
+# none of them. Turning them off does not work in ONNX Runtime 1.29:
+#
+#   core/providers/cuda/llm/attention.cc:39:49: error:
+#   'kCutlassSafeMaskFilterValue' is not a member of
+#   'onnxruntime::contrib::cuda'
+#
+# That constant is defined behind the attention options, and llm/attention.cc
+# references it unconditionally, so USE_MEMORY_EFFICIENT_ATTENTION=OFF breaks
+# the build. It is an upstream configuration bug, found the expensive way -
+# 168 minutes in, at 81%. Do not re-add those flags without checking whether
+# it has been fixed; the wasted kernels are the cheaper of the two options.
 #
 # Parallelism is capped for the same reason. A 4-core arm64 runner with 16 GB
 # multiplies memory by build jobs AND by nvcc threads inside each, and the
@@ -101,10 +106,7 @@ RUN ./build.sh \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
         --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
         --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}" \
-            onnxruntime_BUILD_UNIT_TESTS=OFF \
-            onnxruntime_USE_FLASH_ATTENTION=OFF \
-            onnxruntime_USE_MEMORY_EFFICIENT_ATTENTION=OFF \
-            onnxruntime_USE_LEAN_ATTENTION=OFF
+            onnxruntime_BUILD_UNIT_TESTS=OFF
 
 # Fail here rather than shipping a wheel without the very provider this
 # whole file exists to produce.
