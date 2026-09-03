@@ -162,14 +162,62 @@ WORKDIR /src/onnxruntime
 # are datacentre parts nobody is running a Home Assistant TTS on. Add them
 # back here if that stops being true; the cost is build time, not
 # correctness.
+# --disable_contrib_ops, because the contrib CUDA math kernels are what
+# will not compile. Five builds died at 98% in the same CCCL header, always
+# from contrib_ops/cuda/math: fft_ops_impl, bias_softmax_impl,
+# complex_mul_impl. The header compiles standalone with GCC 14 - the canary
+# above proves it - so it only breaks in those translation units, and the
+# cheapest fix is not to have them.
+#
+# The shipped voice can afford it: all 2664 nodes of glados.onnx are the
+# default ai.onnx domain at opset 15, with no contrib operator anywhere.
+# A future voice that needed one would fail loudly at session load on arm64
+# rather than degrade quietly - amd64 keeps the stock wheel, contrib ops and
+# all.
 ARG CUDA_ARCHS=87;110
 ARG BUILD_PARALLEL=2
 ARG NVCC_THREADS=1
-RUN ./build.sh \
+
+# Configure only. Two to three minutes, and it is what makes the assertion
+# below possible before the multi-hour compile rather than after it.
+RUN ./build.sh --update \
         --cmake_path /opt/cmake/bin/cmake \
-        --config Release --update --build \
+        --config Release \
         --build_wheel --skip_tests --allow_running_as_root \
         --compile_no_warning_as_error \
+        --disable_contrib_ops \
+        --use_cuda --use_tensorrt \
+        --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
+        --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
+        --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}" \
+            onnxruntime_BUILD_UNIT_TESTS=OFF \
+            CMAKE_C_COMPILER=/usr/bin/gcc-14 \
+            CMAKE_CXX_COMPILER=/usr/bin/g++-14 \
+            CMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-14
+
+# Prove the offending kernels are actually out of the build graph.
+#
+# --disable_contrib_ops is an assumption until something checks it. Every
+# previous attempt tested its assumption by running the compile and waiting
+# three and a half hours for the answer; this one greps the generated build
+# rules instead and fails in seconds if those files are still scheduled.
+RUN set -eu; \
+    RULES=build/Linux/Release/CMakeFiles/onnxruntime_providers_cuda.dir; \
+    for f in fft_ops_impl bias_softmax_impl complex_mul_impl; do \
+      if grep -rq "$f" "$RULES" 2>/dev/null; then \
+        echo "$f is still in the build graph despite --disable_contrib_ops"; \
+        exit 1; \
+      fi; \
+    done; \
+    echo "contrib CUDA math kernels are excluded"
+
+# Build. Everything above configured it; this only compiles.
+RUN ./build.sh --build \
+        --cmake_path /opt/cmake/bin/cmake \
+        --config Release \
+        --build_wheel --skip_tests --allow_running_as_root \
+        --compile_no_warning_as_error \
+        --disable_contrib_ops \
         --use_cuda --use_tensorrt \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
         --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
