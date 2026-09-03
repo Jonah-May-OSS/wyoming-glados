@@ -7,7 +7,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wyoming-glados"
-version = "0.1.0"
+# Set on the release branch by .github/workflows/release.yaml, not by
+# hand. main carries the 0.0.0.dev0 placeholder in VERSION so nobody has
+# to remember to bump it, and so a build off main is obviously not a
+# release.
+dynamic = ["version"]
 description = "Wyoming protocol server for GLaDOS TTS"
 requires-python = ">=3.11"
 # GPL-3.0-or-later, not MIT: piper_runtime imports piper.phonemize_espeak at
@@ -22,6 +26,9 @@ license-files = ["LICENSE.md", "NOTICE.md"]
 # excluded from the image by .dockerignore too.
 [tool.setuptools]
 packages = ["server", "piper_runtime"]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
 
 [tool.ruff]
 line-length = 88

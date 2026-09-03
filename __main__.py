@@ -22,6 +22,25 @@ from server.process import GladosProcessManager
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+
+def _read_version() -> str:
+    """Return the release version, or the placeholder outside a release.
+
+    The version is written into VERSION on the release branch by
+    .github/workflows/release.yaml. It is read here rather than through
+    importlib.metadata because the image copies the source tree and runs
+    `python __main__.py` without ever pip-installing the package, so there is
+    no distribution metadata to look up at runtime.
+    """
+    try:
+        return (SCRIPT_DIR / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        # Never take the server down over a missing version string.
+        return "0.0.0.dev0"
+
+
+__version__ = _read_version()
+
 # logger
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -212,6 +231,9 @@ async def main() -> None:
             attribution=voice_attribution,
             installed=True,
             languages=["en"],
+            # The voice model's version, not the server's. The voice is
+            # trained and released on its own tag (voice-YYYY.MM.DD), so this
+            # deliberately does not track __version__ below.
             version="2",
         )
     ]
@@ -226,7 +248,7 @@ async def main() -> None:
                 attribution=voice_attribution,
                 installed=True,
                 voices=voices,
-                version="2",
+                version=__version__,
                 supports_synthesize_streaming=True,  # ← ADDED
             )
         ],

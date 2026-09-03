@@ -1,7 +1,13 @@
 ---
 name: Release
+
+# Creating, publishing and closing the release goes through
+# PERSONAL_GITHUB_TOKEN. GITHUB_TOKEN is used by actions/checkout to clone and
+# by the version step below to push one commit back to the release branch, so
+# it needs contents: write and nothing else.
 permissions:
   contents: write
+
 on:
   push:
     branches:
@@ -22,8 +28,83 @@ jobs:
         id: extract_version
         run: |
           VERSION=${GITHUB_REF#refs/heads/release/}
+          # This value becomes a git tag, a GitHub milestone lookup and the
+          # version setuptools parses out of the VERSION file, so a branch
+          # named release/whatever must fail here rather than three steps
+          # later. Kept in sync with tests/test_version.py, which checks the
+          # pattern against the versions actually released so far.
+          VERSION_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$'
+          if ! printf '%s' "$VERSION" | grep -Eq "$VERSION_PATTERN"; then
+            echo "::error::Branch release/$VERSION does not name a release version"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      # VERSION is what setuptools reads for the package version and what the
+      # server advertises in its Wyoming Info message. main carries a
+      # placeholder rather than a number anyone has to remember to bump, so
+      # the release branch is where the real version gets written. It has to
+      # be committed, not just written: the container workflow builds from the
+      # published tag, so an uncommitted edit would ship the placeholder.
+      #
+      # Pushed with GITHUB_TOKEN on purpose. The same push made with
+      # PERSONAL_GITHUB_TOKEN would match this workflow's own release/* push
+      # trigger and start a second run of it; pushes authenticated with
+      # GITHUB_TOKEN do not trigger workflows.
+      - name: Write the release version into the package
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ "$(cat VERSION)" = "$VERSION" ]; then
+            echo "VERSION already reads $VERSION; nothing to commit."
+            exit 0
+          fi
+          printf '%s\n' "$VERSION" > VERSION
+          git commit VERSION -m "chore(release): set the package version to $VERSION"
+          git push origin "HEAD:${GITHUB_REF#refs/heads/}"
+
+      # GitReleaseManager derives the tag from the milestone name, but it does
+      # not necessarily tag this branch - it can tag the default branch
+      # instead, which would name the commit from *before* the step above and
+      # carry the placeholder into the image. Creating the tag here settles
+      # which commit it names; the create step below finds it already present
+      # and hangs the release off it rather than cutting its own.
+      - name: Tag the release at the version commit
+        run: |
+          existing_obj=$(git ls-remote --tags origin "refs/tags/$VERSION" | cut -f1)
+          if [ -n "$existing_obj" ]; then
+            # `git tag -a` below makes an annotated tag, and ls-remote reports
+            # the tag *object* for one, never the commit it points at - so
+            # comparing that value to HEAD can never match, and every re-run
+            # of this workflow would die claiming the tag names a different
+            # commit. Peel it. A lightweight tag has no ^{} line and its
+            # object is the commit already.
+            existing=$(git ls-remote --tags origin "refs/tags/$VERSION^{}" | cut -f1)
+            [ -n "$existing" ] || existing="$existing_obj"
+            if [ "$existing" = "$(git rev-parse HEAD)" ]; then
+              echo "Tag $VERSION already names this commit."
+              exit 0
+            fi
+            echo "::error::Tag $VERSION already exists and names $existing, not $(git rev-parse HEAD). Delete the tag and the release before re-running."
+            exit 1
+          fi
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "refs/tags/$VERSION"
+
+      # Assert the artifact rather than trusting the steps that produced it.
+      # Everything downstream - the zip, the release, the container image - is
+      # built from this tag, so if it does not carry the right version the
+      # release is wrong and should fail here rather than ship.
+      - name: Verify the tag carries the release version
+        run: |
+          git fetch --quiet --force origin "refs/tags/$VERSION:refs/tags/$VERSION"
+          tagged=$(git show "$VERSION:VERSION")
+          if [ "$tagged" != "$VERSION" ]; then
+            echo "::error::Tag $VERSION carries version '$tagged'"
+            exit 1
+          fi
+          echo "Tag $VERSION carries version $tagged."
 
       - name: Zip Release
         run: zip -x '*.git*' -r release.zip .
