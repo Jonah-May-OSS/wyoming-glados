@@ -177,11 +177,15 @@ RUN ./build.sh --update \
             CMAKE_CXX_COMPILER=/usr/bin/g++-14 \
             CMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-14
 
-# Patch CUDA's bundled CCCL header, which GCC will not compile. The script
-# carries the full explanation; the short version is that CUDA 13 ships a
-# template specialization declared with a global-qualified name, upstream
-# CCCL has since wrapped it in `namespace cuda`, and GCC only accepts the
-# latter. Five builds died at 98% on it.
+# Patch CUDA's bundled CCCL headers, which GCC will not compile. The script
+# carries the full explanation; the short version is that CUDA 13 ships two
+# template specializations declared with a global-qualified name, upstream
+# CCCL has since wrapped one in `namespace cuda` and restructured the other
+# away, and GCC only accepts the wrapped form. Five builds died at 98% on it.
+#
+# It verifies its own postcondition - no such declaration left anywhere under
+# /usr/local/cuda - which is what caught the second one, three minutes in
+# rather than three hours.
 #
 # It exits non-zero if it patched nothing, so this cannot quietly become a
 # no-op once CUDA fixes it - at that point delete the script and this step.
