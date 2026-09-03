@@ -367,3 +367,41 @@ async def test_attribution_credits_this_project(monkeypatch):
     attribution = captured["tts"][0].voices[0].attribution
     assert "R2D2FISH" not in attribution.name
     assert "wyoming-glados" in attribution.url
+
+
+@pytest.mark.asyncio
+async def test_advertised_program_version_is_the_packaged_version(monkeypatch):
+    """The number Home Assistant sees must come from VERSION, not a constant.
+
+    wyoming-whisper-trt shipped 1.2.0, 1.2.1 and 1.2.2 all reporting 1.1.0
+    because the version was a literal somebody had to remember to edit. Here
+    the release workflow writes VERSION, so this asserts the advertised value
+    actually follows that file.
+    """
+    monkeypatch.setattr(sys, "argv", ["prog"])
+    monkeypatch.setattr(mainmod, "PiperTTSRunner", MagicMock())
+
+    captured = {}
+    real_info = mainmod.Info
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return real_info(**kwargs)
+
+    monkeypatch.setattr(mainmod, "Info", capture)
+
+    mock_proc_mgr = MagicMock()
+    mock_proc_mgr.get_process = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod, "GladosProcessManager", MagicMock(return_value=mock_proc_mgr)
+    )
+    mock_server = MagicMock()
+    mock_server.run = MagicMock(return_value=asyncio.sleep(0))
+    monkeypatch.setattr(
+        mainmod.AsyncServer, "from_uri", MagicMock(return_value=mock_server)
+    )
+
+    await mainmod.main()
+
+    expected = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    assert captured["tts"][0].version == expected
