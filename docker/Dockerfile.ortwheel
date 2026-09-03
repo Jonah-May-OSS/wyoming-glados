@@ -85,25 +85,39 @@ RUN set -eu; \
     fi; \
     echo "base provides libnvinfer.so.${TRT_SONAME_MAJOR}, matching the pin"
 
-# GCC 14, and a canary that proves it before the four-hour part.
+# GCC 14 as the DEFAULT compiler, not merely as a cmake variable.
 #
 # CUDA 13's CCCL headers specialize templates with global qualification:
 #
 #   struct ::cuda::proclaims_copyable_arguments<...> : ::cuda::std::true_type
 #
-# GCC rejected that until 14 - "global qualification of class name is
-# invalid before ':' token" - and the base image defaults to GCC 13. It
-# surfaced at 98% of a 213-minute build, in cub/device/device_transform.cuh
-# pulled in by the contrib CUDA kernels.
+# GCC rejected that until 14, and the base image defaults to GCC 13. Passing
+# CMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-14 did NOT fix it - the build failed
+# at 98% on the identical error - so nvcc was still invoking the default
+# host compiler. update-alternatives changes what "g++" means, which nvcc
+# cannot route around; the cmake variables stay as belt and braces.
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+      --slave /usr/bin/g++ g++ /usr/bin/g++-14 \
+    && gcc --version | head -1 \
+    && g++ --version | head -1
+
+# The canary, now compiling what the build actually compiles.
 #
-# The canary compiles that one header and nothing else. If the host compiler
-# and CCCL disagree it fails in seconds rather than three and a half hours.
+# The first version of this included <cub/device/device_transform.cuh> with
+# an explicit -ccbin and passed - then the real build failed on the same
+# header three and a half hours later. It was resolving a different cub and
+# a different host compiler than the build does, so it proved nothing. This
+# one includes the exact file by absolute path and lets nvcc pick its own
+# host compiler, which is the thing under test.
 RUN set -eu; \
-    echo '#include <cub/device/device_transform.cuh>' > /tmp/canary.cu; \
-    echo 'int main() { return 0; }' >> /tmp/canary.cu; \
-    nvcc -ccbin /usr/bin/g++-14 -std=c++17 -c /tmp/canary.cu -o /tmp/canary.o; \
+    HDR=/usr/local/cuda/targets/sbsa-linux/include/cccl/cub/device/device_transform.cuh; \
+    [ -f "$HDR" ] || HDR=$(find /usr/local/cuda -name device_transform.cuh | head -1); \
+    [ -n "$HDR" ] || { echo "cannot find device_transform.cuh to test"; exit 1; }; \
+    echo "testing $HDR with $(g++ --version | head -1)"; \
+    printf '#include "%s"\nint main(){return 0;}\n' "$HDR" > /tmp/canary.cu; \
+    nvcc -std=c++17 -c /tmp/canary.cu -o /tmp/canary.o; \
     rm -f /tmp/canary.cu /tmp/canary.o; \
-    echo "CCCL headers compile with $(/usr/bin/g++-14 --version | head -1)"
+    echo "CCCL headers compile with the default host compiler"
 
 ARG ORT_REF=v1.29.0
 
