@@ -8,4 +8,4 @@ ruff~=0.16.2
 # Pinned to an exact version, not a ~= range, because ty is pre-1.0 and its
 # diagnostics still move between releases. A floating pin would let a routine
 # dependency update turn a green PR red for reasons unrelated to the PR.
-ty==0.0.77
+ty==0.0.78
