@@ -39,8 +39,10 @@ BROKEN = re.compile(
 FIXED = (
     "namespace cuda\n"
     "{\n"
-    r"\1struct \2" "\n"
-    r"\3" "\n"
+    r"\1struct \2"
+    "\n"
+    r"\3"
+    "\n"
     "} // namespace cuda"
 )
 
