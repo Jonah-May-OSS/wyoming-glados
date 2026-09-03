@@ -101,23 +101,13 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
     && gcc --version | head -1 \
     && g++ --version | head -1
 
-# The canary, now compiling what the build actually compiles.
-#
-# The first version of this included <cub/device/device_transform.cuh> with
-# an explicit -ccbin and passed - then the real build failed on the same
-# header three and a half hours later. It was resolving a different cub and
-# a different host compiler than the build does, so it proved nothing. This
-# one includes the exact file by absolute path and lets nvcc pick its own
-# host compiler, which is the thing under test.
-RUN set -eu; \
-    HDR=/usr/local/cuda/targets/sbsa-linux/include/cccl/cub/device/device_transform.cuh; \
-    [ -f "$HDR" ] || HDR=$(find /usr/local/cuda -name device_transform.cuh | head -1); \
-    [ -n "$HDR" ] || { echo "cannot find device_transform.cuh to test"; exit 1; }; \
-    echo "testing $HDR with $(g++ --version | head -1)"; \
-    printf '#include "%s"\nint main(){return 0;}\n' "$HDR" > /tmp/canary.cu; \
-    nvcc -std=c++17 -c /tmp/canary.cu -o /tmp/canary.o; \
-    rm -f /tmp/canary.cu /tmp/canary.o; \
-    echo "CCCL headers compile with the default host compiler"
+# The canary that used to sit here is gone. It compiled
+# device_transform.cuh standalone and passed while the real build failed on
+# that same header three and a half hours later - twice - because ORT only
+# hits the broken declaration from inside its own translation units. A check
+# that cannot fail when the thing it guards is broken is worse than none,
+# and patch-cccl.py's postcondition (no global-qualified specialization left
+# anywhere under /usr/local/cuda) is the assertion that actually holds.
 
 ARG ORT_REF=v1.29.0
 
@@ -162,18 +152,11 @@ WORKDIR /src/onnxruntime
 # are datacentre parts nobody is running a Home Assistant TTS on. Add them
 # back here if that stops being true; the cost is build time, not
 # correctness.
-# --disable_contrib_ops, because the contrib CUDA math kernels are what
-# will not compile. Five builds died at 98% in the same CCCL header, always
-# from contrib_ops/cuda/math: fft_ops_impl, bias_softmax_impl,
-# complex_mul_impl. The header compiles standalone with GCC 14 - the canary
-# above proves it - so it only breaks in those translation units, and the
-# cheapest fix is not to have them.
-#
-# The shipped voice can afford it: all 2664 nodes of glados.onnx are the
-# default ai.onnx domain at opset 15, with no contrib operator anywhere.
-# A future voice that needed one would fail loudly at session load on arm64
-# rather than degrade quietly - amd64 keeps the stock wheel, contrib ops and
-# all.
+# Contrib ops stay enabled. They cannot be turned off: the TensorRT EP
+# requires them for its EPContext node, and onnxruntime_providers_tensorrt
+# fails configuration outright with --disable_contrib_ops. That was worth
+# knowing - it is where the contrib CUDA math kernels that would not compile
+# live - but the fix had to be the CCCL patch above instead.
 ARG CUDA_ARCHS=87;110
 ARG BUILD_PARALLEL=2
 ARG NVCC_THREADS=1
@@ -185,7 +168,6 @@ RUN ./build.sh --update \
         --config Release \
         --build_wheel --skip_tests --allow_running_as_root \
         --compile_no_warning_as_error \
-        --disable_contrib_ops \
         --use_cuda --use_tensorrt \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
         --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
@@ -195,21 +177,16 @@ RUN ./build.sh --update \
             CMAKE_CXX_COMPILER=/usr/bin/g++-14 \
             CMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-14
 
-# Prove the offending kernels are actually out of the build graph.
+# Patch CUDA's bundled CCCL header, which GCC will not compile. The script
+# carries the full explanation; the short version is that CUDA 13 ships a
+# template specialization declared with a global-qualified name, upstream
+# CCCL has since wrapped it in `namespace cuda`, and GCC only accepts the
+# latter. Five builds died at 98% on it.
 #
-# --disable_contrib_ops is an assumption until something checks it. Every
-# previous attempt tested its assumption by running the compile and waiting
-# three and a half hours for the answer; this one greps the generated build
-# rules instead and fails in seconds if those files are still scheduled.
-RUN set -eu; \
-    RULES=build/Linux/Release/CMakeFiles/onnxruntime_providers_cuda.dir; \
-    for f in fft_ops_impl bias_softmax_impl complex_mul_impl; do \
-      if grep -rq "$f" "$RULES" 2>/dev/null; then \
-        echo "$f is still in the build graph despite --disable_contrib_ops"; \
-        exit 1; \
-      fi; \
-    done; \
-    echo "contrib CUDA math kernels are excluded"
+# It exits non-zero if it patched nothing, so this cannot quietly become a
+# no-op once CUDA fixes it - at that point delete the script and this step.
+COPY docker/patch-cccl.py /tmp/patch-cccl.py
+RUN python3 /tmp/patch-cccl.py && rm -f /tmp/patch-cccl.py
 
 # Build. Everything above configured it; this only compiles.
 RUN ./build.sh --build \
@@ -217,7 +194,6 @@ RUN ./build.sh --build \
         --config Release \
         --build_wheel --skip_tests --allow_running_as_root \
         --compile_no_warning_as_error \
-        --disable_contrib_ops \
         --use_cuda --use_tensorrt \
         --cuda_home /usr/local/cuda --cudnn_home /usr --tensorrt_home /usr \
         --parallel "${BUILD_PARALLEL}" --nvcc_threads "${NVCC_THREADS}" \
