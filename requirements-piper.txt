@@ -12,4 +12,4 @@
 # no per-requirement --no-deps) and lives in its own file instead.
 #
 # Its runtime deps are pinned in requirements.txt: pathvalidate.
-piper-tts~=1.7.0
+piper-tts~=1.8.0
