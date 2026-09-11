@@ -22,7 +22,7 @@ regex~=2026.9.3
 # legacy torch dependency happened to drag those in; with torch gone, omitting
 # them leaves onnxruntime listing TensorrtExecutionProvider as "available"
 # while failing to create it, and every request silently runs on CPU.
-onnxruntime-gpu[cuda,cudnn]~=1.29.0
+onnxruntime-gpu[cuda,cudnn]~=1.30.0
 tensorrt-cu13==10.16.1.11
 
 # A piper-tts dependency. Declared here because piper-tts itself must be
