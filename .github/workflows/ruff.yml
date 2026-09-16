@@ -23,13 +23,13 @@ jobs:
       - name: Ruff Check (Auto-fix)
         uses: astral-sh/ruff-action@v4.1.0
         with:
-          version: "0.15.10"
+          version: "0.16.7"
           src: "."
           args: "check --fix"
       - name: Ruff Format (Auto-fix)
         uses: astral-sh/ruff-action@v4.1.0
         with:
-          version: "0.15.10"
+          version: "0.16.7"
           src: "."
           args: "format"
       - name: Detect changes
