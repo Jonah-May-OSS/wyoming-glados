@@ -84,7 +84,7 @@ jobs:
     if: needs.resolve.outputs.needed == 'true'
     # Native arm64 rather than QEMU: emulating a CUDA compile is the one
     # thing guaranteed to make this unaffordable. Free for public repos.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     # Just under the hosted-runner cap, so a build that does not fit records
     # that fact instead of being killed with nothing to show. If this ever
     # trips, THAT is the evidence for moving the job to a self-hosted runner.
