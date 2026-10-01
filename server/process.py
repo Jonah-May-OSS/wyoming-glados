@@ -70,8 +70,9 @@ class GladosProcess:
             return False
 
         def produce() -> None:
-            stream = self.runner.run_tts_stream(text, alpha)
+            stream = None
             try:
+                stream = self.runner.run_tts_stream(text, alpha)
                 iterator = iter(stream)
                 while not cancelled.is_set():
                     try:
