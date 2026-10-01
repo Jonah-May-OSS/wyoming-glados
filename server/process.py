@@ -72,7 +72,12 @@ class GladosProcess:
         def produce() -> None:
             stream = self.runner.run_tts_stream(text, alpha)
             try:
-                for pcm in stream:
+                iterator = iter(stream)
+                while not cancelled.is_set():
+                    try:
+                        pcm = next(iterator)
+                    except StopIteration:
+                        break
                     if not offer(pcm):
                         return
             finally:
@@ -107,9 +112,20 @@ class GladosProcess:
             # sentence, unblock a pending queue put, and wait for that call to
             # finish before releasing this stream.
             cancelled.set()
-            if not future.done():
-                with contextlib.suppress(Exception):
+            interrupted = False
+            while not future.done():
+                try:
                     await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    # A repeated cancel must not let the ONNX worker outlive
+                    # this stream. Re-raise after the worker has stopped.
+                    interrupted = True
+                except Exception:
+                    break
+            with contextlib.suppress(Exception):
+                future.result()
+            if interrupted:
+                raise asyncio.CancelledError
 
 
 class GladosProcessManager:
