@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import threading
 import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
@@ -49,25 +51,46 @@ class GladosProcess:
         """Process the text, yielding PCM chunks as the model produces them.
 
         Inference runs in a worker thread so the event loop stays responsive;
-        each PCM chunk is forwarded here as soon as the vocoder emits it, so
-        playback can start before the utterance is fully synthesized.
+        a one-chunk queue bounds audio buffered ahead of a slow client.
         """
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
+        cancelled = threading.Event()
+
+        def offer(item: Any) -> bool:
+            """Send one item with backpressure, stopping promptly on cancel."""
+            put = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+            while not cancelled.is_set():
+                try:
+                    put.result(timeout=0.1)
+                    return True
+                except TimeoutError:
+                    continue
+            put.cancel()
+            return False
 
         def produce() -> None:
             stream = self.runner.run_tts_stream(text, alpha)
             try:
-                for pcm in stream:
-                    loop.call_soon_threadsafe(queue.put_nowait, pcm)
+                iterator = iter(stream)
+                while not cancelled.is_set():
+                    try:
+                        pcm = next(iterator)
+                    except StopIteration:
+                        break
+                    if not offer(pcm):
+                        return
             finally:
                 close = getattr(stream, "close", None)
-                if close is not None:
-                    close()
+                try:
+                    if close is not None:
+                        close()
+                finally:
+                    if not cancelled.is_set():
+                        offer(_stream_end)
 
+        future = loop.run_in_executor(None, produce)
         try:
-            future = loop.run_in_executor(None, produce)
-            future.add_done_callback(lambda _: queue.put_nowait(_stream_end))
             while True:
                 item = await queue.get()
                 if item is _stream_end:
@@ -83,6 +106,26 @@ class GladosProcess:
                 "TTS processing failed for text: %s... Error: %s", text[:50], e
             )
             raise
+        finally:
+            # Cancelling the async consumer cannot interrupt an ONNX call
+            # already running in the executor. Stop it from starting another
+            # sentence, unblock a pending queue put, and wait for that call to
+            # finish before releasing this stream.
+            cancelled.set()
+            interrupted = False
+            while not future.done():
+                try:
+                    await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    # A repeated cancel must not let the ONNX worker outlive
+                    # this stream. Re-raise after the worker has stopped.
+                    interrupted = True
+                except Exception:
+                    break
+            with contextlib.suppress(Exception):
+                future.result()
+            if interrupted:
+                raise asyncio.CancelledError
 
 
 class GladosProcessManager:
