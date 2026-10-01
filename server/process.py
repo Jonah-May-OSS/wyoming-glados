@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
@@ -107,10 +108,8 @@ class GladosProcess:
             # finish before releasing this stream.
             cancelled.set()
             if not future.done():
-                try:
+                with contextlib.suppress(Exception):
                     await asyncio.shield(future)
-                except Exception:
-                    pass
 
 
 class GladosProcessManager:
