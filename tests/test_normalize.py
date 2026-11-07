@@ -22,6 +22,9 @@ from piper_runtime.normalize import normalize_text
         ("It is -5 outside.", "It is -5 outside."),
         # Numeric ranges read as "to".
         ("Ages 3–5.", "Ages 3 to 5."),
+        # Newlines are not pauses: bullets and line-leading dashes survive.
+        ("First item\n- second item", "First item\n- second item"),
+        ("Said so.\n— Hello", "Said so.\n— Hello"),
     ],
 )
 def test_dashes(text: str, expected: str) -> None:
@@ -41,6 +44,11 @@ def test_dashes(text: str, expected: str) -> None:
         # Ambiguous units stay as words when separated by a space.
         ("I left 5 in the box.", "I left 5 in the box."),
         ("Wait 5min.", "Wait 5 minutes."),
+        # Plurals and identifiers are not seconds or quantities.
+        ("Back in the 1990s.", "Back in the 1990s."),
+        ("Two Boeing 747s and 10s of people.", "Two Boeing 747s and 10s of people."),
+        ("My mp3s and B2B deals.", "My mp3s and B2B deals."),
+        ("Wait 30 sec.", "Wait 30 seconds."),
         # No number, no expansion.
         ("The kg button.", "The kg button."),
     ],

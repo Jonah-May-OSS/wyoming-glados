@@ -15,11 +15,13 @@ from __future__ import annotations
 import re
 
 # Pause dashes. Order matters: handle runs/spaced forms before single chars.
-_DIGIT_RANGE = re.compile(r"(?<=\d)\s*[–—]\s*(?=\d)")  # 3–5 -> 3 to 5
+# Whitespace is horizontal only ([ \t]): a newline before a dash is a list
+# bullet or a line break, not a pause, and must survive.
+_DIGIT_RANGE = re.compile(r"(?<=\d)[ \t]*[–—][ \t]*(?=\d)")  # 3–5 -> 3 to 5
 _PAUSE_DASH = re.compile(
-    r"\s*(?:—|–|―|--+)\s*"  # em, en, horizontal bar, double hyphen
-    r"|(?<=\S)\s+-+\s+(?=\S)"  # spaced hyphen between words
-    r"|\s+-+\s*$"  # trailing interrupted hyphen: "He probably -"
+    r"(?<=\S)[ \t]*(?:—|–|―|--+)[ \t]*"  # em, en, horizontal bar, double hyphen
+    r"|(?<=\S)[ \t]+-+[ \t]+(?=\S)"  # spaced hyphen between words
+    r"|(?<=\S)[ \t]+-+[ \t]*$"  # trailing interrupted hyphen: "He probably -"
 )
 _COMMA_RUN = re.compile(r"\s*,(?:\s*,)+")
 _COMMA_BEFORE_END = re.compile(r",\s*(?=[.!?…]|$)")
@@ -55,7 +57,7 @@ _UNITS: dict[str, tuple[str, str]] = {
     "°": ("degree", "degrees"),
     "%": ("percent", "percent"),
     "ms": ("millisecond", "milliseconds"),
-    "s": ("second", "seconds"),
+    # No bare "s": "1990s", "747s" and "10s of people" are plurals, not seconds.
     "sec": ("second", "seconds"),
     "min": ("minute", "minutes"),
     "h": ("hour", "hours"),
@@ -80,9 +82,10 @@ _UNITS: dict[str, tuple[str, str]] = {
 _UNIT_ALT = "|".join(re.escape(u) for u in sorted(_UNITS, key=len, reverse=True))
 # Units that are also common words/letters need a space-free attachment or
 # must not be followed by another letter: "5 in the box" must stay "in".
-_AMBIGUOUS = {"in", "A", "s", "t", "h", "m", "g", "l", "L", "V", "W", "min"}
+_AMBIGUOUS = {"in", "A", "t", "h", "m", "g", "l", "L", "V", "W", "min"}
+# (?<!\w): digits inside an identifier ("mp3s", "B2B") are not a quantity.
 _UNIT_RE = re.compile(
-    rf"(?P<num>-?\d+(?:[.,]\d+)*)(?P<sp>\s?)(?P<unit>{_UNIT_ALT})(?![\w/])"
+    rf"(?<!\w)(?P<num>-?\d+(?:[.,]\d+)*)(?P<sp>\s?)(?P<unit>{_UNIT_ALT})(?![\w/])"
 )
 
 
