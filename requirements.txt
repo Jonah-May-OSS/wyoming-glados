@@ -1,4 +1,4 @@
-wyoming==1.10.2
+wyoming==1.11.0
 numpy~=2.5.2
 
 # Read only at startup, to resolve TensorRT shape profiles: the profile inputs
