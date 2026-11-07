@@ -36,7 +36,7 @@ class ModelFile(TypedDict):
 # shipping a retrained voice is an explicit one-line bump here, reviewable in
 # the PR that ships it. This is what the pre-Piper code did (it pinned
 # glados-tts 1.0.0), arrived at the same way.
-VOICE_RELEASE = "voice-2026.09.01"
+VOICE_RELEASE = "voice-2026.11.07"
 
 # md5 of each asset on VOICE_RELEASE, keyed by filename. Bump with the tag.
 #
@@ -46,8 +46,8 @@ VOICE_RELEASE = "voice-2026.09.01"
 # glados' hashes and re-download forever.
 DEFAULT_VOICE_NAME = "glados"
 VOICE_CHECKSUMS: dict[str, str] = {
-    "glados.onnx": "fbe7ad25c02eff554e69f3a8128f71a7",
-    "glados.onnx.json": "bcd03937e5bdaeac0ef5c7fafee91d06",
+    "glados.onnx": "43a728ca48ee33cdb48094127d4301b6",
+    "glados.onnx.json": "49cc521bc1a2137e40ddf865e19f8ff0",
 }
 DEFAULT_URL = (
     "https://github.com/Jonah-May-OSS/wyoming-glados/releases/download/"
