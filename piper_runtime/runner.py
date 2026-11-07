@@ -55,6 +55,8 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from .normalize import normalize_text
+
 _LOGGER = logging.getLogger(__name__)
 
 SAMPLE_RATE = 22050
@@ -734,6 +736,7 @@ class PiperTTSRunner:
         Serialised: see the note on _phonemize_lock. The call is short next to
         synthesis, so this costs little of the pipeline's overlap.
         """
+        text = normalize_text(text)
         with self._phonemize_lock:
             return list(self._phonemizer.phonemize(self.espeak_voice, text))
 
