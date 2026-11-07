@@ -47,7 +47,7 @@ VOICE_RELEASE = "voice-2026.11.07"
 DEFAULT_VOICE_NAME = "glados"
 VOICE_CHECKSUMS: dict[str, str] = {
     "glados.onnx": "43a728ca48ee33cdb48094127d4301b6",
-    "glados.onnx.json": "35180b9354c4020abe74c7ad33f35712",
+    "glados.onnx.json": "49cc521bc1a2137e40ddf865e19f8ff0",
 }
 DEFAULT_URL = (
     "https://github.com/Jonah-May-OSS/wyoming-glados/releases/download/"
